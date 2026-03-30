@@ -36,6 +36,10 @@ A conda environment is an isolated workspace that keeps all the required package
   <img src="tutorial_images/windows_menu.png" />
 </p>
 
+<p align="center">
+  <img src="tutorial_images/terminal_example.png" />
+</p>
+
 ### Create and activate the environment
 
 ```bash
