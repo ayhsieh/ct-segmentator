@@ -144,18 +144,25 @@ Download the python file [here](https://github.com/ayhsieh/ct-segmentator/blob/m
 <p align="center">
   <img src="tutorial_images/download_button.png" />
 </p>
-Place `segment_structures.py` in the same folder as where your DICOM folder(s) is (or anywhere accessible), then run:
+Place `segment_structures.py` in the same folder as where your DICOM folder(s) is:
+
+<p align="center">
+  <img src="tutorial_images/folder_structure.png" />
+</p>
+
+
+Then run:
 
 ### Process a single patient folder
 The `--task` flag is **required** — you must always specify what to segment:
 
 ```bash
-python segment_structures.py --task brain_structures path/to/PATIENT_FOLDER
+python segment_structures.py --task brain_structures {DICOM folder name}/{patient folder name}
 ```
 
 ### Process all patient folders at once
 ```bash
-python segment_structures.py --task brain_structures path/to/folder/containing/all/patients
+python segment_structures.py --task brain_structures {DICOM folder name}
 ```
 
 ### Task examples
@@ -224,5 +231,9 @@ These files can be loaded directly into **3D Slicer** for visualisation.
 To create a csv file of everything, download `combine.py` [here](https://github.com/ayhsieh/ct-segmentator/blob/main/combine.py) (or with `git clone` if familiar) and run:
 
 ```bash
-python combine.py
+python produce_table.py
 ```
+
+<p align="center">
+  <img src="tutorial_images/another_folder.png" />
+</p>
