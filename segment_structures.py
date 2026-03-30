@@ -1,13 +1,3 @@
-"""
-Segment anatomical structures from DICOM using TotalSegmentator and combine results.
-
-Usage:
-    python segment_and_combine.py --task brain_structures /path/to/dicom/folder
-    python segment_and_combine.py --task total /path/to/parent/folder
-    python segment_and_combine.py --task lung_vessels folder1 folder2
-    python segment_and_combine.py --task brain_structures --skip-planning folder
-"""
-
 import os
 import json
 import argparse
