@@ -4,6 +4,33 @@ This guide walks you through setting up the environment and running the segmenta
 
 ---
 
+## TL;DR
+
+DICOM → NIfTI → TotalSegmentator segmentation, with automatic series selection and caching. Outputs per-structure `.nii.gz` masks and a `statistics.json` of volumes (mm³).
+
+**Setup:**
+```bash
+conda create -n segmentator python=3.10 -y && conda activate segmentator
+# Windows NVIDIA GPU:
+pip install pydicom dicom2nifti nibabel numpy totalsegmentator torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# Mac / CPU:
+pip install pydicom dicom2nifti nibabel numpy totalsegmentator torch torchvision torchaudio
+```
+
+**Run** (from the directory containing your DICOM folder(s), `--task` is required):
+```bash
+python segment_structures.py --task brain_structures path/to/patients   # batch
+python segment_structures.py --task total path/to/patients --skip-planning  # skip manual prompts
+python segment_structures.py --task total path/to/patients --force-redo     # re-run all
+python produce_table.py   # aggregate statistics.json files into a CSV
+```
+
+Some tasks (e.g. `brain_structures`) require a free academic license: `totalseg_set_license -l <key>`. Full task list [here](https://github.com/wasserth/totalsegmentator?tab=readme-ov-file#subtasks).
+
+Results land in `converted_nifti/` and `total_segmentor_results/<patient>/`.
+
+---
+
 ## What Does This Pipeline Do?
 
 This pipeline takes CT or MRI scans in DICOM format and automatically segments anatomical structures using **TotalSegmentator**, a deep learning tool developed at University Hospital Basel. It can identify over 100 different structures including organs, bones, muscles, vessels, and brain regions.
