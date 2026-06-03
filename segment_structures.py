@@ -1,8 +1,11 @@
 import os
+import re
 import json
 import argparse
-import subprocess
+import hashlib
 import traceback
+
+import nrrd
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
@@ -12,6 +15,9 @@ import dicom2nifti
 import dicom2nifti.settings as dicom2nifti_settings
 import nibabel as nib
 import numpy as np
+
+from totalsegmentator.python_api import totalsegmentator
+from totalsegmentator.nifti_ext_header import load_multilabel_nifti
 
 dicom2nifti_settings.disable_validate_orthogonal()
 dicom2nifti_settings.disable_validate_slice_increment()
@@ -49,12 +55,6 @@ LICENSED_TASKS = [
     "tissue_types",
     "brain_aneurysm",
 ]
-
-ALL_TASKS = AVAILABLE_TASKS + LICENSED_TASKS
-
-# Tasks where automatic head CT series selection applies
-BRAIN_TASKS = {"brain_structures", "brain_structures_mr", "cerebral_bleed",
-               "oculomotor_muscles", "face", "face_mr", "brain_aneurysm"}
 
 # Tags needed for series scanning
 _SCAN_TAGS = ["SeriesInstanceUID", "SeriesNumber", "SeriesDescription"]
@@ -348,14 +348,15 @@ def resolve_from_cache(entry, dicom_folder):
     return files, entry.get("desc", ""), entry["snum"]
 
 
-def plan_all_folders(all_folders, cache, task, skip_manual=False, force_redo=False):
+def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=False):
     """
     Pass 1: Scan all folders and resolve series selections.
-    For brain-related tasks, uses DICOM metadata scoring to auto-select.
-    For other tasks, always prompts for manual selection.
+    Uses DICOM metadata scoring to auto-select the best soft-tissue series.
+    Falls back to manual selection if no clear winner.
     If skip_manual=True, folders needing manual selection are skipped.
     If force_redo=True, folders with existing output are re-processed.
-    Returns list of (dicom_folder, files, desc, snum) tuples.
+    Returns list of (dicom_folder, files, desc, snum, tasks_to_run) tuples, where
+    tasks_to_run is a subset of `tasks` that actually need to be run for that folder.
     """
     resolved = []
     needs_manual = []
@@ -364,7 +365,7 @@ def plan_all_folders(all_folders, cache, task, skip_manual=False, force_redo=Fal
     AUTO_SELECT_MIN_GAP = 15
 
     print("\n" + "=" * 60)
-    print(f"PASS 1: Scanning all folders (task: {task})...")
+    print(f"PASS 1: Scanning all folders (tasks: {', '.join(tasks)})...")
     print("  Auto-selection ENABLED")
     if skip_manual:
         print("  --skip-planning: folders needing manual selection will be skipped")
@@ -378,13 +379,22 @@ def plan_all_folders(all_folders, cache, task, skip_manual=False, force_redo=Fal
             print(f"\nCould not find '{dicom_folder}' - skipping.")
             continue
 
+        # Figure out which tasks still need to run for this folder
         seg_out = TOTALSEG_OUTPUT_DIR / dicom_folder.name
-        if not force_redo:
-            if seg_out.exists() and any(seg_out.iterdir()) and (seg_out / "statistics.json").exists():
-                print(f"\n[SKIP] '{dicom_folder.name}' - segmentation already exists.")
+        tasks_to_run = []
+        for task in tasks:
+            if force_redo:
+                tasks_to_run.append(task)
                 continue
-            elif seg_out.exists() and any(seg_out.iterdir()):
-                print(f"\n[REDO] '{dicom_folder.name}' - output exists but statistics.json missing, will re-segment.")
+            # We mark a task "done" if its multilabel file exists
+            existing_ml = seg_out / f"{task}.nii.gz" if seg_out.exists() else None
+            if existing_ml and existing_ml.exists():
+                print(f"[SKIP] '{dicom_folder.name}' task '{task}' - already exists: {existing_ml.name}")
+            else:
+                tasks_to_run.append(task)
+
+        if not tasks_to_run:
+            continue
 
         folder_key = str(dicom_folder.resolve())
 
@@ -394,7 +404,7 @@ def plan_all_folders(all_folders, cache, task, skip_manual=False, force_redo=Fal
             files, desc, snum = resolve_from_cache(entry, dicom_folder)
             if files:
                 print(f"\n[CACHE] '{dicom_folder.name}' - series {snum} '{desc or '(no description)'}'")
-                resolved.append((dicom_folder, files, desc, snum))
+                resolved.append((dicom_folder, files, desc, snum, tasks_to_run))
                 continue
             else:
                 fmt = "old format" if not isinstance(entry, dict) else "directory missing"
@@ -415,28 +425,27 @@ def plan_all_folders(all_folders, cache, task, skip_manual=False, force_redo=Fal
             continue
 
         # Auto-selection
-        if True:
-            best_files, best_meta, best_score, best_reasons = scored_series[0]
-            second_score = scored_series[1][2] if len(scored_series) > 1 else -999
-            gap = best_score - second_score
+        best_files, best_meta, best_score, best_reasons = scored_series[0]
+        second_score = scored_series[1][2] if len(scored_series) > 1 else -999
+        gap = best_score - second_score
 
-            if best_score >= AUTO_SELECT_MIN_SCORE and gap >= AUTO_SELECT_MIN_GAP:
-                snum = best_meta["snum"]
-                desc = best_meta["desc"]
-                cache[folder_key] = {
-                    "snum": snum,
-                    "desc": desc,
-                    "series_dir": str(Path(best_files[0]).parent),
-                }
-                print(f"\n[AUTO] '{dicom_folder.name}' - series {snum} '{desc}' "
-                      f"(score={best_score}, gap={gap})")
-                print(f"  -> {', '.join(best_reasons)}")
-                resolved.append((dicom_folder, best_files, desc, snum))
-                continue
+        if best_score >= AUTO_SELECT_MIN_SCORE and gap >= AUTO_SELECT_MIN_GAP:
+            snum = best_meta["snum"]
+            desc = best_meta["desc"]
+            cache[folder_key] = {
+                "snum": snum,
+                "desc": desc,
+                "series_dir": str(Path(best_files[0]).parent),
+            }
+            print(f"\n[AUTO] '{dicom_folder.name}' - series {snum} '{desc}' "
+                  f"(score={best_score}, gap={gap})")
+            print(f"  -> {', '.join(best_reasons)}")
+            resolved.append((dicom_folder, best_files, desc, snum, tasks_to_run))
+            continue
 
         # Manual selection needed
         print(f"\n[MANUAL] '{dicom_folder.name}' - needs manual selection.")
-        needs_manual.append((dicom_folder, folder_key, scored_series))
+        needs_manual.append((dicom_folder, folder_key, scored_series, tasks_to_run))
 
     # Batch save cache after all auto-selections
     save_cache(cache)
@@ -453,59 +462,172 @@ def plan_all_folders(all_folders, cache, task, skip_manual=False, force_redo=Fal
             print(f"MANUAL SELECTION REQUIRED for {len(needs_manual)} folder(s):")
             print("=" * 60)
 
-            for dicom_folder, folder_key, scored_series in needs_manual:
+            for dicom_folder, folder_key, scored_series, tasks_to_run in needs_manual:
                 result = prompt_series_selection(dicom_folder, scored_series, folder_key, cache)
                 if result is not None:
                     files, desc, snum = result
-                    resolved.append((dicom_folder, files, desc, snum))
+                    resolved.append((dicom_folder, files, desc, snum, tasks_to_run))
 
     return resolved
 
 
 # ---------------------------------------------------------------------------
-# Combine segmentation masks and compute statistics
+# Multilabel NIfTI helpers
 # ---------------------------------------------------------------------------
 
-def compute_statistics(seg_folder, nifti_path=None):
-    """Compute volume (mm³) and mean intensity for each segmentation mask.
-    Saves results to statistics_custom.json in the segmentation folder.
-    If nifti_path is provided, also computes mean intensity within each mask."""
-    seg_folder = Path(seg_folder)
-    nifti_files = sorted(seg_folder.glob("*.nii.gz"))
+def _deterministic_color(name):
+    """Hash a structure name to a stable RGB triple in 0-255, avoiding very dark values."""
+    h = hashlib.md5(name.encode("utf-8")).digest()
+    r, g, b = h[0], h[1], h[2]
+    # Lift dark values so segments are visible on dark backgrounds
+    r = 60 + (r % 196)
+    g = 60 + (g % 196)
+    b = 60 + (b % 196)
+    return r, g, b
 
-    if not nifti_files:
+
+def _strip_lr_suffix(name):
+    """Strip _left/_right suffix so paired structures share a base color."""
+    return re.sub(r'_(left|right)$', '', name)
+
+
+def multilabel_to_segnrrd(seg_img, label_map, output_path):
+    """Write a 3D Slicer .seg.nrrd file from a multilabel NIfTI image and label map.
+    All segment names, colors, and metadata are baked into the nrrd header so no
+    .ctbl or other companion files are needed.
+    Left/right paired structures share a color."""
+    output_path = Path(output_path)
+    data = np.asarray(seg_img.dataobj, dtype=np.uint8)
+    affine = seg_img.affine
+
+    # Convert RAS -> LPS for Slicer
+    lps_affine = affine.copy()
+    lps_affine[0, :] *= -1
+    lps_affine[1, :] *= -1
+
+    origin = lps_affine[:3, 3].tolist()
+    dir_i = lps_affine[:3, 0].tolist()
+    dir_j = lps_affine[:3, 1].tolist()
+    dir_k = lps_affine[:3, 2].tolist()
+
+    # Build label -> name map
+    name_by_label = {}
+    for k, v in label_map.items():
+        try:
+            name_by_label[int(k)] = str(v)
+        except (TypeError, ValueError):
+            continue
+
+    labels = sorted([int(l) for l in np.unique(data) if l > 0])
+
+    header = {
+        "type": "unsigned char",
+        "space": "left-posterior-superior",
+        "space directions": [dir_i, dir_j, dir_k],
+        "space origin": origin,
+        "kinds": ["domain", "domain", "domain"],
+        "encoding": "gzip",
+    }
+
+    base_color_map = {}
+
+    for seg_idx, label in enumerate(labels):
+        name = name_by_label.get(label, f"label_{label}")
+        base = _strip_lr_suffix(name)
+
+        if base not in base_color_map:
+            r, g, b = _deterministic_color(base)
+            base_color_map[base] = f"{r/255:.3f} {g/255:.3f} {b/255:.3f}"
+        color = base_color_map[base]
+
+        nonzero = np.argwhere(data == label)
+        if len(nonzero) > 0:
+            mins = nonzero.min(axis=0)
+            maxs = nonzero.max(axis=0)
+            extent = f"{mins[0]} {maxs[0]} {mins[1]} {maxs[1]} {mins[2]} {maxs[2]}"
+        else:
+            extent = "0 0 0 0 0 0"
+
+        header[f"Segment{seg_idx}_ID"] = name
+        header[f"Segment{seg_idx}_Name"] = name
+        header[f"Segment{seg_idx}_Layer"] = "0"
+        header[f"Segment{seg_idx}_LabelValue"] = str(label)
+        header[f"Segment{seg_idx}_Color"] = color
+        header[f"Segment{seg_idx}_Extent"] = extent
+        header[f"Segment{seg_idx}_NameAutoGenerated"] = "0"
+        header[f"Segment{seg_idx}_ColorAutoGenerated"] = "0"
+
+    nrrd.write(str(output_path), data, header, index_order='F')
+    print(f"  Segmentation saved: {output_path} ({len(labels)} segments)")
+
+
+def process_multilabel_output(multilabel_path, nifti_path=None, task_name=None):
+    """Convert a multilabel NIfTI from TotalSegmentator into a single .seg.nrrd
+    file (with all segment metadata baked in) and compute per-class statistics.
+
+    The intermediate multilabel .nii.gz is deleted after successful conversion,
+    leaving only the .seg.nrrd and .stats.json files."""
+    multilabel_path = Path(multilabel_path)
+    if not multilabel_path.exists():
         return
 
-    # Load the source image for intensity stats if available
+    try:
+        seg_img, label_map = load_multilabel_nifti(str(multilabel_path))
+    except Exception as e:
+        print(f"  Could not read multilabel header from {multilabel_path.name}: {e}")
+        return
+
+    # Output .seg.nrrd named after the task (or the multilabel filename if not given)
+    if task_name:
+        segnrrd_path = multilabel_path.parent / f"{task_name}.seg.nrrd"
+    else:
+        stem = multilabel_path.name
+        if stem.endswith(".nii.gz"):
+            stem = stem[:-7]
+        elif stem.endswith(".nii"):
+            stem = stem[:-4]
+        segnrrd_path = multilabel_path.parent / f"{stem}.seg.nrrd"
+
+    try:
+        multilabel_to_segnrrd(seg_img, label_map, segnrrd_path)
+    except Exception as e:
+        print(f"  Could not write .seg.nrrd: {e}")
+        return
+
+    # --- Compute statistics from the same in-memory data ---
+    seg_data = np.asarray(seg_img.dataobj)
+    voxel_dims = seg_img.header.get_zooms()[:3]
+    voxel_vol_mm3 = float(np.prod(voxel_dims))
+
     source_data = None
     if nifti_path and Path(nifti_path).exists():
         try:
             source_data = np.asarray(nib.load(str(nifti_path)).dataobj)
+            if source_data.shape != seg_data.shape:
+                print(f"  Warning: source image shape {source_data.shape} "
+                      f"!= segmentation shape {seg_data.shape}; skipping intensity stats.")
+                source_data = None
         except Exception:
             pass
 
     stats = {}
-    for nifti_file in nifti_files:
-        if nifti_file.name in ("combined.nii.gz",):
+    for label_value, structure_name in label_map.items():
+        try:
+            label_int = int(label_value)
+        except (TypeError, ValueError):
+            continue
+        if label_int == 0:
             continue
 
-        img = nib.load(nifti_file)
-        data = np.asarray(img.dataobj)
-        mask = data > 0
-
-        # Voxel volume in mm³ from the header
-        voxel_dims = img.header.get_zooms()[:3]
-        voxel_vol_mm3 = float(np.prod(voxel_dims))
-
+        mask = seg_data == label_int
         voxel_count = int(np.count_nonzero(mask))
         volume_mm3 = round(voxel_count * voxel_vol_mm3, 2)
 
-        structure_name = nifti_file.name.replace(".nii.gz", "")
         entry = {
+            "label": label_int,
             "volume_mm3": volume_mm3,
             "voxel_count": voxel_count,
         }
-
         if source_data is not None and voxel_count > 0:
             try:
                 entry["mean_intensity"] = round(float(np.mean(source_data[mask])), 2)
@@ -514,38 +636,27 @@ def compute_statistics(seg_folder, nifti_path=None):
 
         stats[structure_name] = entry
 
-    stats_path = seg_folder / "statistics_custom.json"
+    stats_name = task_name if task_name else multilabel_path.stem.replace(".nii", "")
+    stats_path = multilabel_path.parent / f"{stats_name}.stats.json"
     with open(stats_path, "w") as f:
         json.dump(stats, f, indent=2)
-    print(f"  Custom statistics saved: {stats_path}")
+    print(f"  Statistics saved: {stats_path}")
+
+    # --- Delete the intermediate multilabel .nii.gz ---
+    try:
+        multilabel_path.unlink()
+        print(f"  Removed intermediate file: {multilabel_path.name}")
+    except Exception as e:
+        print(f"  Could not remove intermediate file {multilabel_path.name}: {e}")
 
 
-def combine_segmentations(seg_folder):
-    """Combine all NIfTI segmentation masks in a folder into a single binary mask."""
-    seg_folder = Path(seg_folder)
-    nifti_files = sorted(seg_folder.glob("*.nii.gz"))
-
-    if not nifti_files:
-        print(f"  No NIfTI files found in '{seg_folder}' - nothing to combine.")
-        return
-
-    combined = None
-    affine = None
-
-    for nifti_file in nifti_files:
-        if nifti_file.name == "combined.nii.gz":
-            continue
-        img = nib.load(nifti_file)
-        data = np.asarray(img.dataobj)
-        if combined is None:
-            combined = np.zeros(data.shape, dtype=np.uint8)
-            affine = img.affine
-        combined[data > 0] = 1
-
-    if combined is not None:
-        combined_path = seg_folder / "combined.nii.gz"
-        nib.save(nib.Nifti1Image(combined, affine), combined_path)
-        print(f"  Combined mask saved: {combined_path}")
+def find_source_nifti(dicom_folder_name):
+    """Return the path to the converted NIfTI for a study, if one exists."""
+    nifti_out = NIFTI_OUTPUT_DIR / dicom_folder_name
+    if not nifti_out.is_dir():
+        return None
+    niftis = sorted(nifti_out.glob("*.nii.gz"))
+    return niftis[0] if niftis else None
 
 
 # ---------------------------------------------------------------------------
@@ -554,22 +665,37 @@ def combine_segmentations(seg_folder):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Segment anatomical structures from DICOM using TotalSegmentator.",
+        description="Segment anatomical structures from DICOM using TotalSegmentator. "
+                    "Produces one multilabel NIfTI per task, with class names stored in "
+                    "the extended header and readable via load_multilabel_nifti().",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"Available tasks:\n  " + "\n  ".join(AVAILABLE_TASKS) +
                f"\n\nLicensed tasks (free for non-commercial use):\n  " + "\n  ".join(LICENSED_TASKS)
     )
     parser.add_argument("dicom_folders", nargs="+",
                         help="DICOM folder(s) or parent folder containing subfolders.")
-    parser.add_argument("--task", "-ta", required=True, choices=ALL_TASKS,
-                        help="TotalSegmentator task to run (e.g., brain_structures, total, lung_vessels).")
+    parser.add_argument("--task", "-ta", required=True, nargs="+",
+                        metavar="TASK",
+                        help="TotalSegmentator task(s) to run. Accepts multiple, "
+                             "e.g. --task total face head_muscles. "
+                             "See the epilog for known tasks (not validated).")
     parser.add_argument("--skip-planning", action="store_true",
                         help="Skip manual series selection; only process cached and auto-selected folders.")
-    parser.add_argument("--combine-only", action="store_true",
-                        help="Skip segmentation; only combine existing results in the output directory.")
+    parser.add_argument("--stats-only", action="store_true",
+                        help="Skip segmentation; only recompute statistics from existing multilabel files.")
     parser.add_argument("--force-redo", action="store_true",
                         help="Re-segment all folders, even if output already exists.")
+    parser.add_argument("--fast", action="store_true",
+                        help="Use the lower-resolution (3mm) model for faster runtime.")
+    parser.add_argument("--device", default="gpu", choices=["gpu", "cpu", "mps"],
+                        help="Device for inference (default: gpu).")
+    parser.add_argument("--license-number",
+                        help="License number for commercial/restricted tasks.")
     args = parser.parse_args()
+
+    # Deduplicate tasks while preserving order
+    seen = set()
+    tasks = [t for t in args.task if not (t in seen or seen.add(t))]
 
     cache = load_cache()
 
@@ -581,32 +707,38 @@ def main():
             print(f"\nCould not find '{folder}' - skipping.")
         all_folders.extend(expanded)
 
-    # --combine-only: just run the combination and statistics steps on existing outputs
-    if args.combine_only:
+    # --stats-only: recompute stats from existing multilabel files
+    if args.stats_only:
         print("\n" + "=" * 60)
-        print("COMBINE-ONLY MODE")
+        print("STATS-ONLY MODE")
         print("=" * 60)
         for dicom_folder in all_folders:
             name = Path(dicom_folder).name
             seg_out = TOTALSEG_OUTPUT_DIR / name
-            if seg_out.is_dir():
-                print(f"\nCombining masks in: {seg_out}")
-                combine_segmentations(seg_out)
-                # Try to find the source NIfTI for intensity stats
-                nifti_out = NIFTI_OUTPUT_DIR / name
-                nifti_path = None
-                if nifti_out.is_dir():
-                    niftis = list(nifti_out.glob("*.nii.gz"))
-                    if niftis:
-                        nifti_path = str(niftis[0])
-                print(f"Computing statistics from masks...")
-                compute_statistics(seg_out, nifti_path)
-            else:
+            if not seg_out.is_dir():
                 print(f"\nNo segmentation output found for '{name}' - skipping.")
+                continue
+
+            source_nifti = find_source_nifti(name)
+            multilabel_files = sorted(seg_out.glob("*.nii.gz"))
+            if not multilabel_files:
+                print(f"\nNo multilabel files in {seg_out} - skipping.")
+                continue
+
+            print(f"\nProcessing {name}:")
+            for ml_file in multilabel_files:
+                # Derive task name from filename (e.g. brain_structures.nii.gz -> brain_structures)
+                task_name = ml_file.name
+                if task_name.endswith(".nii.gz"):
+                    task_name = task_name[:-7]
+                elif task_name.endswith(".nii"):
+                    task_name = task_name[:-4]
+                print(f"  {ml_file.name}")
+                process_multilabel_output(ml_file, source_nifti, task_name=task_name)
         return
 
     # Resolve work items (series selection)
-    work_items = plan_all_folders(all_folders, cache, args.task,
+    work_items = plan_all_folders(all_folders, cache, tasks,
                                    skip_manual=args.skip_planning,
                                    force_redo=args.force_redo)
 
@@ -614,7 +746,7 @@ def main():
         print("\nNo folders to process. Exiting.")
         return
 
-    # Pass 2: convert, segment, and combine
+    # Pass 2: convert + segment (one run per task)
     LOG_DIR = Path("error_logs")
     LOG_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -624,55 +756,65 @@ def main():
     print(f"PASS 2: Processing {len(work_items)} folder(s)...")
     print("=" * 60)
 
-    for dicom_folder, files, desc, snum in work_items:
+    for dicom_folder, files, desc, snum, tasks_to_run in work_items:
         try:
             print(f"\n{'=' * 60}")
             print(f"Processing: {dicom_folder}")
+            print(f"Tasks: {', '.join(tasks_to_run)}")
             print(f"{'=' * 60}")
 
             series_dir = str(Path(files[0]).parent)
 
-            # --- Convert DICOM to NIfTI ---
+            # --- Convert DICOM to NIfTI (once per study) ---
             nifti_out = NIFTI_OUTPUT_DIR / dicom_folder.name
             nifti_out.mkdir(parents=True, exist_ok=True)
             if desc:
-                nifti_name = sanitize_filename(f"series_{snum}_{desc}")
+                nifti_stem = sanitize_filename(f"series_{snum}_{desc}")
             else:
-                nifti_name = f"series_{snum}_unnamed"
-            nifti_path = nifti_out / f"{nifti_name}.nii.gz"
+                nifti_stem = f"series_{snum}_unnamed"
+            nifti_path = nifti_out / f"{nifti_stem}.nii.gz"
 
-            print(f"\nConverting: '{desc or '(no description)'}' -> {nifti_path}")
-            dicom2nifti.dicom_series_to_nifti(series_dir, str(nifti_path))
-            print("Conversion done.")
+            if not nifti_path.exists():
+                print(f"\nConverting: '{desc or '(no description)'}' -> {nifti_path}")
+                dicom2nifti.dicom_series_to_nifti(series_dir, str(nifti_path))
+                print("Conversion done.")
+            else:
+                print(f"\nUsing existing NIfTI: {nifti_path}")
 
-            # --- Run TotalSegmentator ---
+            # --- Run TotalSegmentator for each requested task ---
             seg_out = TOTALSEG_OUTPUT_DIR / dicom_folder.name
             seg_out.mkdir(parents=True, exist_ok=True)
-            cmd = [
-                "TotalSegmentator",
-                "-i", str(nifti_path),
-                "-o", str(seg_out),
-                "-ta", args.task,
-                "--statistics",
-            ]
-            print(f"\nRunning: {' '.join(cmd)}")
-            result = subprocess.run(cmd)
-            if result.returncode != 0:
-                raise RuntimeError(f"TotalSegmentator exited with code {result.returncode}")
 
-            # --- Combine segmentation masks ---
-            print(f"\nCombining segmentation masks in: {seg_out}")
-            combine_segmentations(seg_out)
+            for task in tasks_to_run:
+                multilabel_path = seg_out / f"{task}.nii.gz"
+                print(f"\n--- Running TotalSegmentator task '{task}' ---")
+                print(f"    input:  {nifti_path}")
+                print(f"    output: {multilabel_path}")
 
-            # --- Compute our own statistics ---
-            print(f"Computing statistics from masks...")
-            compute_statistics(seg_out, nifti_path)
+                kwargs = dict(
+                    input=str(nifti_path),
+                    output=str(multilabel_path),
+                    task=task,
+                    ml=True,             # <-- single multilabel file per task
+                    fast=args.fast,
+                    device=args.device,
+                    statistics=False,    # we compute our own below
+                )
+                if args.license_number:
+                    kwargs["license_number"] = args.license_number
+
+                totalsegmentator(**kwargs)
+
+                # --- Compute our own per-class statistics from the multilabel file ---
+                print(f"    Computing statistics...")
+                process_multilabel_output(multilabel_path, nifti_path, task_name=task)
 
         except Exception as e:
             error_msg = (
                 f"[ERROR] {dicom_folder}\n"
                 f"  Series: {snum} - {desc or '(no description)'}\n"
-                f"  Error: {e}\n"
+                f"  Tasks:  {', '.join(tasks_to_run)}\n"
+                f"  Error:  {e}\n"
                 f"  Traceback:\n{traceback.format_exc()}\n"
             )
             print(f"\n[ERROR] Failed on '{dicom_folder.name}': {e}")
