@@ -1,0 +1,22 @@
+DICOM*/
+converted_nifti
+stl_files
+*xlsx
+*csv
+*json
+total_segmentor_results
+*zip
+error_logs
+# QC renders and figures, anywhere. tutorial_images/ is already tracked and stays
+# tracked - gitignore does not untrack - so add a new one there with `git add -f`.
+*.png
+archive/
+floor_maps/
+__pycache__/
+
+# every CT lives here. Ignored as a whole directory so patient data cannot be
+# committed by accident, whatever a stray `git add -A` sweeps up.
+/ct_scans/
+
+# vendored cuMIP landmark model: third-party code plus 41 MB of weights
+/cranial_ct_processing/
