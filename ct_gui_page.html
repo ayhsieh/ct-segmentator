@@ -110,6 +110,44 @@ canvas{border:1px solid var(--line);border-radius:6px;cursor:crosshair;
 .editable:hover::after,.editable:focus::after{opacity:1}
 .reasons{color:var(--faint);font-size:12px;font-family:var(--sans)}
 .right{margin-left:auto}
+/* ---- slice viewer. Two columns: the structure list and the image. Wider than the
+   reading column the rest of the tool uses, hence body.wide, set by route(). */
+body.wide main{max-width:1180px}
+.vwrap{display:grid;grid-template-columns:270px 1fr;gap:16px;align-items:start}
+.vwrap.hide,.vrow[hidden],.vgrp[hidden]{display:none}
+.vside{border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  padding:10px;display:flex;flex-direction:column;gap:8px}
+.vtree{overflow:auto;flex:1;min-height:120px;max-height:min(60vh,560px)}
+.vgrp{border-top:1px solid var(--line);padding-top:5px;margin-top:5px}
+.vgrp:first-child{border-top:0;margin-top:0;padding-top:0}
+.vgrph,.vrow{display:flex;align-items:center;gap:6px;font-family:var(--sans);
+  font-size:13px;border-radius:5px;cursor:pointer}
+.vgrph{font-weight:600;padding:3px 4px}
+.vrow{padding:2px 4px 2px 15px;color:var(--mid)}
+.vgrph:hover,.vrow:hover{background:var(--panel)}
+.vrow.on{color:var(--ink)}
+.vsw{width:11px;height:11px;border-radius:3px;flex:none;opacity:.25}
+.vrow.on .vsw{opacity:1}
+.veye{flex:none;width:15px;text-align:center;opacity:.25;font-size:11px}
+.vrow.on .veye,.vgrph.on .veye{opacity:.9}
+.vname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vcount{margin-left:auto;color:var(--faint);font-size:11px;font-weight:400}
+.vcar{flex:none;width:10px;color:var(--faint);font-size:10px}
+.vstage{position:relative;background:#0b0b0c;border-radius:8px;
+  height:min(64vh,600px);display:flex;align-items:center;justify-content:center;
+  overflow:hidden;cursor:crosshair;user-select:none;touch-action:none}
+.vstage:focus{outline:2px solid var(--accent);outline-offset:2px}
+.vstage img{display:block;pointer-events:none}
+/* .hide is a single class and loses to the rules above on specificity */
+.vstage img.hide,.vstage canvas.hide{display:none}
+.vbusy{position:absolute;top:9px;right:12px;color:#fff;opacity:.7;font-size:12px;
+  font-family:var(--sans)}
+.vempty{color:var(--faint);font-family:var(--sans);font-size:13px;padding:8px 4px}
+.v3d{border:0;border-radius:8px;image-rendering:auto;max-width:none;display:block;
+  cursor:grab;touch-action:none}
+.v3d.drag{cursor:grabbing}
+.vcap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:340px;
+  text-align:center;color:#e8e2d6;font-family:var(--sans);font-size:13px;line-height:1.5}
 .stack>*+*{margin-top:9px}
 </style>
 </head>
@@ -171,6 +209,7 @@ const ROUTES = {
   new:     (a) => newProject(a[0] || ""),
   project: (a) => project(a[0]),
   fossa:   (a) => fossa(a[0], a[1]),
+  viewseg: (a) => viewseg(a[0], a[1]),
 };
 function nav(v, ...args) {
   const h = "#" + [v].concat(args.map(encodeURIComponent)).join("/");
@@ -181,6 +220,9 @@ function route() {
   const parts = location.hash.replace(/^#/, "").split("/")
                   .filter(Boolean).map(decodeURIComponent);
   const v = parts.shift() || "home";
+  /* The viewer needs a wider column than anything else. Toggled here rather than in
+     the page function, so no other page has to remember to put it back. */
+  document.body.classList.toggle("wide", v === "viewseg");
   (ROUTES[v] || ROUTES.home)(parts);
 }
 window.addEventListener("hashchange", route);
@@ -434,11 +476,14 @@ async function project(name) {
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
           ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
       <td class="row" style="gap:2px">
+        ${c.converted ? '<button class="quiet vsg">view segmentation</button>' : ''}
         ${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}
         ${c.tasks.length || c.fossae || c.brain_icv
           ? '<button class="quiet sif" title="open this case\'s output folder">show in folder</button>' : ''}
       </td>
     </tr>`);
+    const vsg = tr.querySelector(".vsg");
+    if (vsg) vsg.onclick = () => nav("viewseg", name, c.case);
     const rev = tr.querySelector(".rev");
     if (rev) rev.onclick = () => nav("fossa", name, c.case);
     const sif = tr.querySelector(".sif");
@@ -963,6 +1008,741 @@ async function fossa(name, cse) {
     document.getElementById("roll").value = 0;
     draw(); send({}, ev.currentTarget, "Refitting…");
   };
+}
+
+
+
+/* ------------------------------------------------------------- 3d viewer */
+/* A small WebGL2 renderer, written out rather than pulled in: the whole tool is one
+   self-contained page with no vendored JavaScript, and "spin the structures around"
+   needs so little of a 3D library that taking on 700 KB to get it would be the wrong
+   trade. Lit triangles, an orbit camera, and back-to-front ordering when things go
+   translucent - that is all of it.
+
+   WebGL2 specifically, for uint32 indices: a structure runs to tens of thousands of
+   vertices, past what uint16 can address, and splitting meshes to avoid that would be
+   more code than requiring a context every browser has had for years. */
+
+const V3_VERT = `#version 300 es
+in vec3 aPos;
+in vec3 aNrm;
+uniform mat4 uMVP;
+uniform mat3 uNM;
+out vec3 vN;
+void main(){ vN = uNM * aNrm; gl_Position = uMVP * vec4(aPos, 1.0); }`;
+
+const V3_FRAG = `#version 300 es
+precision highp float;
+in vec3 vN;
+uniform vec3 uColor;
+uniform float uAlpha;
+out vec4 o;
+void main(){
+  /* Headlight down the eye axis. abs() rather than max(...,0) so it does not matter
+     which way marching cubes wound the surface, and so back faces are lit properly
+     once the opacity comes down and you can see them. */
+  float d = abs(normalize(vN).z);
+  float f = 0.24 + 0.76 * d + 0.10 * pow(d, 40.0);
+  o = vec4(uColor * f, uAlpha);
+}`;
+
+/* -- just enough matrix maths, column-major to match WebGL ---------------- */
+function m4mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+function m4perspective(fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2), o = new Float32Array(16);
+  o[0] = f / aspect; o[5] = f; o[11] = -1;
+  o[10] = (far + near) / (near - far);
+  o[14] = 2 * far * near / (near - far);
+  return o;
+}
+const m4translate = (x, y, z) => {
+  const o = new Float32Array(16); o[0] = o[5] = o[10] = o[15] = 1;
+  o[12] = x; o[13] = y; o[14] = z; return o;
+};
+function m4rotX(t) {
+  const c = Math.cos(t), s = Math.sin(t), o = new Float32Array(16);
+  o[0] = 1; o[5] = c; o[6] = s; o[9] = -s; o[10] = c; o[15] = 1; return o;
+}
+function m4rotZ(t) {
+  const c = Math.cos(t), s = Math.sin(t), o = new Float32Array(16);
+  o[0] = c; o[1] = s; o[4] = -s; o[5] = c; o[10] = 1; o[15] = 1; return o;
+}
+
+function makeViewer3D(canvas) {
+  const gl = canvas.getContext("webgl2", {antialias: true, alpha: false, depth: true});
+  if (!gl) return {ok: false};
+
+  const sh = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  let prog, loc;
+  function buildProgram() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, V3_VERT));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, V3_FRAG));
+    gl.bindAttribLocation(prog, 0, "aPos");
+    gl.bindAttribLocation(prog, 1, "aNrm");
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+      throw new Error(gl.getProgramInfoLog(prog));
+    loc = {mvp: gl.getUniformLocation(prog, "uMVP"),
+           nm: gl.getUniformLocation(prog, "uNM"),
+           color: gl.getUniformLocation(prog, "uColor"),
+           alpha: gl.getUniformLocation(prog, "uAlpha")};
+  }
+  buildProgram();
+
+  /* key -> {vao, nidx, color, bmin, bmax, raw}. The decoded ArrayBuffer is kept so a
+     lost GL context can be rebuilt without going back to the network. */
+  const meshes = new Map();
+  let order = [];                     /* draw order, recomputed when the camera moves */
+  let alpha = 1, lost = false, need = false;
+  const cam = {az: 0, el: 0, dist: 200, target: [0, 0, 0], moved: false};
+
+  function invalidate() {
+    if (need || lost) return;
+    need = true;
+    requestAnimationFrame(() => { need = false; draw(); });
+  }
+
+  function upload(m) {
+    const nv = m.nv;
+    m.vao = gl.createVertexArray();
+    gl.bindVertexArray(m.vao);
+    const vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(m.raw, 40, nv * 3), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    const nb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, nb);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(m.raw, 40 + nv * 12, nv * 3),
+                  gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+    const ib = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
+                  new Uint32Array(m.raw, 40 + nv * 24, m.nidx), gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    m.bufs = [vb, nb, ib];
+  }
+
+  /* Decode the blob the server sent. gzip is undone by the browser before this. */
+  function add(key, buf, color) {
+    const dv = new DataView(buf);
+    if (String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2),
+                            dv.getUint8(3)) !== "MSH1")
+      throw new Error("not a mesh");
+    const nv = dv.getUint32(4, true), nt = dv.getUint32(8, true);
+    if (!nv || !nt) { meshes.set(key, {empty: true}); return; }
+    const m = {raw: buf, nv: nv, nidx: nt * 3, color: hex3(color),
+               bmin: [dv.getFloat32(16, true), dv.getFloat32(20, true), dv.getFloat32(24, true)],
+               bmax: [dv.getFloat32(28, true), dv.getFloat32(32, true), dv.getFloat32(36, true)]};
+    m.centre = [0, 1, 2].map(k => (m.bmin[k] + m.bmax[k]) / 2);
+    upload(m);
+    meshes.set(key, m);
+    if (!cam.moved) fit();
+    invalidate();
+  }
+  const hex3 = (h) => {
+    const s = String(h).replace("#", "");
+    return [0, 2, 4].map(k => parseInt(s.substr(k, 2), 16) / 255);
+  };
+
+  /* Frame everything visible. Skipped once the user has moved the camera, so
+     structures arriving one at a time do not keep yanking the view. */
+  function fit() {
+    const live = [...meshes.values()].filter(m => !m.empty);
+    if (!live.length) return;
+    const lo = [0, 1, 2].map(k => Math.min(...live.map(m => m.bmin[k])));
+    const hi = [0, 1, 2].map(k => Math.max(...live.map(m => m.bmax[k])));
+    cam.target = [0, 1, 2].map(k => (lo[k] + hi[k]) / 2);
+    const r = Math.max(1, Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2);
+    cam.dist = r / Math.sin(35 * Math.PI / 360) * 1.15;
+    cam.radius = r;
+  }
+
+  function viewMatrix() {
+    /* Rz spins about the patient's superior axis; the -90 degree Rx that follows puts
+       superior up the screen and starts the camera in front of the face, which is the
+       view anyone expects to open on. */
+    return m4mul(m4mul(m4translate(0, 0, -cam.dist),
+                       m4mul(m4rotX((cam.el - 90) * Math.PI / 180),
+                             m4rotZ(cam.az * Math.PI / 180))),
+                 m4translate(-cam.target[0], -cam.target[1], -cam.target[2]));
+  }
+
+  function draw() {
+    if (lost) return;
+    const W = canvas.width, H = canvas.height;
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(0.043, 0.043, 0.047, 1);
+    gl.enable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);            /* interiors are visible when translucent */
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const live = [...meshes.entries()].filter(([k, m]) => !m.empty && m.vao);
+    if (!live.length) return;
+
+    const view = viewMatrix();
+    const mvp = m4mul(m4perspective(35 * Math.PI / 180, W / Math.max(1, H),
+                                    Math.max(0.1, cam.dist * 0.02), cam.dist * 10), view);
+    const nm = new Float32Array([view[0], view[1], view[2],
+                                 view[4], view[5], view[6],
+                                 view[8], view[9], view[10]]);
+    gl.useProgram(prog);
+    gl.uniformMatrix4fv(loc.mvp, false, mvp);
+    gl.uniformMatrix3fv(loc.nm, false, nm);
+
+    /* Sort back to front by the eye-space depth of each bounding box centre. Per
+       object, not per triangle: for the case that matters - one structure nested
+       inside another, brain inside ICV - the object order is exactly right, and a
+       136k-element sort per frame to do better is not worth it here. */
+    const depth = (m) => view[2] * m.centre[0] + view[6] * m.centre[1]
+                       + view[10] * m.centre[2] + view[14];
+    order = live.sort((a, b) => depth(a[1]) - depth(b[1]));
+
+    const one = (m) => {
+      gl.bindVertexArray(m.vao);
+      gl.uniform3fv(loc.color, m.color);
+      gl.uniform1f(loc.alpha, alpha);
+      gl.drawElements(gl.TRIANGLES, m.nidx, gl.UNSIGNED_INT, 0);
+    };
+    if (alpha >= 0.99) {
+      gl.depthMask(true); gl.disable(gl.BLEND);
+      for (const [, m] of order) one(m);
+    } else {
+      /* Depth test on so solid geometry still occludes, depth write off so the
+         surfaces behind are not thrown away before they are drawn. */
+      gl.depthMask(false);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      for (const [, m] of order) one(m);
+      gl.depthMask(true); gl.disable(gl.BLEND);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  /* -- interaction ------------------------------------------------------- */
+  let drag = null;
+  canvas.onpointerdown = (e) => {
+    drag = {x: e.clientX, y: e.clientY, az: cam.az, el: cam.el,
+            t: cam.target.slice(), pan: e.shiftKey || e.button === 1 || e.button === 2};
+    /* Capture keeps a drag alive when the cursor leaves the canvas. It throws if the
+       pointer has already gone, which must not take the drag down with it. */
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    canvas.classList.add("drag");
+  };
+  canvas.onpointermove = (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (drag.pan) {
+      /* Pan in the camera's own plane, scaled so a pixel of drag moves the model by
+         a pixel's worth of millimetres at the distance we are looking from. */
+      const k = 2 * cam.dist * Math.tan(35 * Math.PI / 360) / canvas.clientHeight;
+      const v = viewMatrix();
+      const right = [v[0], v[4], v[8]], up = [v[1], v[5], v[9]];
+      cam.target = [0, 1, 2].map(i => drag.t[i] - right[i] * dx * k + up[i] * dy * k);
+    } else {
+      /* Signs chosen so the model follows the pointer, as if you had hold of the
+         surface: drag down and the top tilts towards you. The other way round reads
+         as inverted to everyone who has used any other 3D viewer. */
+      cam.az = drag.az + dx * 0.5;
+      /* Clamped short of the pole: letting it tip over flips the horizon and makes
+         "which way is up" a thing you have to think about. */
+      cam.el = Math.max(-89, Math.min(89, drag.el + dy * 0.5));
+    }
+    cam.moved = true;
+    invalidate();
+  };
+  const endDrag = (e) => {
+    if (!drag) return;
+    drag = null; canvas.classList.remove("drag");
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  canvas.onpointerup = endDrag;
+  canvas.onpointercancel = endDrag;
+  canvas.oncontextmenu = (e) => e.preventDefault();      /* right-drag pans instead */
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = cam.radius || 100;
+    cam.dist = Math.max(r * 0.05, Math.min(r * 40, cam.dist * Math.exp(e.deltaY * 0.0015)));
+    cam.moved = true;
+    invalidate();
+  }, {passive: false});
+  canvas.ondblclick = () => { cam.moved = false; cam.az = cam.el = 0; fit(); invalidate(); };
+
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault(); lost = true;
+    for (const m of meshes.values()) if (!m.empty) { m.vao = null; m.bufs = null; }
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    lost = false; buildProgram();
+    for (const m of meshes.values()) if (!m.empty) upload(m);
+    invalidate();
+  });
+
+  function drop(key) {
+    const m = meshes.get(key);
+    if (m && m.vao) { gl.deleteVertexArray(m.vao); (m.bufs || []).forEach(b => gl.deleteBuffer(b)); }
+    meshes.delete(key);
+  }
+
+  return {
+    ok: true,
+    has: (key) => meshes.has(key),
+    add: add,
+    drop: drop,
+    keys: () => [...meshes.keys()],
+    triangles: () => [...meshes.values()].reduce((a, m) => a + (m.empty ? 0 : m.nidx / 3), 0),
+    setOpacity: (a) => { if (a !== alpha) { alpha = a; invalidate(); } },
+    view: (az, el) => { cam.az = az; cam.el = el; cam.moved = true; invalidate(); },
+    refit: () => { cam.moved = false; fit(); invalidate(); },
+    invalidate: invalidate,
+    resize: () => {
+      const b = canvas.parentNode.getBoundingClientRect();
+      /* Capped at 2: a 3x display costs 2.25 times the fragments for nothing anyone
+         can see on an anatomical blob. */
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = Math.max(1, Math.round(b.width)), h = Math.max(1, Math.round(b.height));
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      const W = Math.round(w * dpr), H = Math.round(h * dpr);
+      if (canvas.width !== W || canvas.height !== H) {
+        canvas.width = W; canvas.height = H; invalidate();
+      }
+    },
+    dispose: () => {
+      for (const k of [...meshes.keys()]) drop(k);
+      if (prog) gl.deleteProgram(prog);
+      const ext = gl.getExtension("WEBGL_lose_context");
+      if (ext) ext.loseContext();
+    },
+  };
+}
+
+/* --------------------------------------------------------------- slice viewer */
+/* Scroll a CT, switch structures on and off, without leaving for Slicer. Everything
+   drawn is composited by the server and arrives as one PNG, so this side is an <img>,
+   a slider and a list - no canvas and no 3D library. Two things make it feel
+   immediate: one request in flight at a time with latest-wins coalescing, and
+   swapping in an Image() that has already decoded rather than setting src directly. */
+async function viewseg(name, cse) {
+  stopPoll();
+  crumb.textContent = name + " · " + cse;
+  view.innerHTML = "";
+  view.append($(`<div>
+    <div class="row" style="margin-bottom:14px">
+      <h1 style="margin:0">Segmentation</h1>
+      <span class="right"><button class="ghost" id="back">Back to project</button></span>
+    </div>
+    <div id="vhead"></div>
+    <div class="vwrap hide" id="vwrap">
+      <aside class="vside">
+        <input type="search" id="vq" placeholder="Search structures">
+        <div class="row" style="gap:2px">
+          <button class="quiet" id="vall">show all</button>
+          <button class="quiet" id="vnone">hide all</button>
+        </div>
+        <div class="vtree" id="vtree"></div>
+      </aside>
+      <section>
+        <div class="row" style="margin:0 0 10px">
+          <span class="row" style="gap:4px" id="vplanes"></span>
+          <span class="right row" style="gap:4px" id="vpre"></span>
+        </div>
+        <div class="vstage" id="vstage" tabindex="0">
+          <img id="vimg" alt="">
+          <div class="vbusy hide" id="vbusy">loading…</div>
+        </div>
+        <input type="range" id="vsl" style="width:100%;margin:12px 0 2px"
+               min="0" max="0" value="0">
+        <div class="row meta">
+          <span class="mono" id="vlabel"></span>
+          <span class="right row" style="gap:7px">
+            <label for="vop">overlay</label>
+            <input type="range" id="vop" min="0" max="100" value="45" style="width:110px">
+            <span class="mono" id="vopv">45%</span>
+          </span>
+        </div>
+      </section>
+    </div></div>`));
+  const g = (id) => document.getElementById(id);
+  g("back").onclick = () => nav("project", name);
+
+  let st;
+  try {
+    st = await api("/api/view/case?name=" + encodeURIComponent(name) +
+                   "&case=" + encodeURIComponent(cse));
+  } catch (e) {
+    /* "RuntimeError: this case has not been converted yet" - the sentence after the
+       colon was written for whoever is reading it; the class name in front was not. */
+    g("vhead").append(err(new Error(String(e.message || e).replace(/^\w*Error: /, ""))));
+    return;
+  }
+  g("vwrap").classList.remove("hide");
+  for (const w of st.warnings || []) g("vhead").append($(`<div class="note amber">${esc(w)}</div>`));
+
+  const PL = ["axial", "coronal", "sagittal"];
+  const S = {plane: "axial", mode: "2d", idx: {}, op: 45, op3: 100,
+             ww: st.presets[st.default][0], wl: st.presets[st.default][1]};
+  for (const p of PL) S.idx[p] = Math.floor(st.planes[p].n / 2);
+
+  /* One bitset per task, indexed by the segment index the server sent. The same
+     numbering is the DOM id, the colour table row and the URL, so nothing has to be
+     translated anywhere. */
+  const bits = new Map();
+  for (const L of st.layers) bits.set(L.task, new Uint8Array(Math.ceil(L.segments.length / 8)));
+  const isOn = (t, i) => (bits.get(t)[i >> 3] >> (i & 7)) & 1;
+  const setOn = (t, i, on) => {
+    const b = bits.get(t);
+    if (on) b[i >> 3] |= 1 << (i & 7); else b[i >> 3] &= ~(1 << (i & 7));
+  };
+
+  /* Open with the most specific group lit - it is last in the paint order - so the
+     first frame shows something without being 117 structures of mush. */
+  const last = st.layers[st.layers.length - 1];
+  if (last && last.segments.length <= 40) last.segments.forEach(s => setOn(last.task, s.i, true));
+
+  /* ---- sidebar, built once and never rebuilt. Toggling flips a class and a byte, so
+     the scroll position and whatever is typed in the search box always survive. */
+  const rows = [];
+  const tree = g("vtree");
+  if (!st.layers.length) {
+    tree.append($(`<div class="vempty">Nothing segmented yet — the CT still scrolls.</div>`));
+  }
+  for (const L of st.layers) {
+    const grp = $(`<div class="vgrp"></div>`);
+    const head = $(`<div class="vgrph">
+      <span class="vcar">${L.segments.length > 20 ? "▸" : "▾"}</span>
+      <span class="veye">●</span><span class="vname">${esc(L.task)}</span>
+      <span class="vcount">${L.segments.length}</span></div>`);
+    const body = $(`<div></div>`);
+    if (L.segments.length > 20) body.classList.add("hide");
+    for (const sg of L.segments) {
+      const row = $(`<div class="vrow">
+        <span class="veye">●</span>
+        <span class="vsw" style="background:${esc(sg.color)}"></span>
+        <span class="vname">${esc(sg.name)}</span></div>`);
+      row.onclick = (e) => {
+        if (e.shiftKey) {           /* solo within the group */
+          L.segments.forEach(o => setOn(L.task, o.i, o.i === sg.i));
+        } else {
+          setOn(L.task, sg.i, !isOn(L.task, sg.i));
+        }
+        syncTree(); request();
+      };
+      rows.push({el: row, task: L.task, i: sg.i, name: sg.name.toLowerCase(), grp: grp});
+      body.append(row);
+    }
+    head.onclick = (e) => {
+      if (e.target.classList.contains("veye")) {   /* the eye toggles the whole task */
+        const all = L.segments.every(o => isOn(L.task, o.i));
+        L.segments.forEach(o => setOn(L.task, o.i, !all));
+        syncTree(); request();
+      } else {                                     /* anywhere else just collapses */
+        body.classList.toggle("hide");
+        head.querySelector(".vcar").textContent = body.classList.contains("hide") ? "▸" : "▾";
+      }
+    };
+    grp.append(head, body);
+    grp._head = head; grp._layer = L;
+    tree.append(grp);
+  }
+  function syncTree() {
+    for (const r of rows) r.el.classList.toggle("on", !!isOn(r.task, r.i));
+    for (const grp of tree.querySelectorAll(".vgrp")) {
+      const L = grp._layer, n = L.segments.filter(o => isOn(L.task, o.i)).length;
+      grp._head.classList.toggle("on", n > 0);
+      grp._head.querySelector(".vcount").textContent =
+        n ? n + " / " + L.segments.length : L.segments.length;
+    }
+  }
+  g("vq").oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    for (const r of rows) r.el.hidden = !!q && !r.name.includes(q);
+    for (const grp of tree.querySelectorAll(".vgrp")) {
+      const body = grp.children[1];
+      if (q) { body.classList.remove("hide"); grp._head.querySelector(".vcar").textContent = "▾"; }
+      grp.hidden = !!q && !grp._layer.segments.some(
+        o => o.name.toLowerCase().includes(q));
+    }
+  };
+  const setAll = (on) => {
+    for (const L of st.layers) L.segments.forEach(o => setOn(L.task, o.i, on));
+    syncTree(); request();
+  };
+  g("vall").onclick = () => setAll(true);
+  g("vnone").onclick = () => setAll(false);
+
+  /* ---- plane and window buttons */
+  const planeBtns = {}, preBtns = {};
+  for (const p of PL) {
+    const b = $(`<button class="ghost">${p}</button>`);
+    b.onclick = () => { S.plane = p; S.mode = "2d"; paintChrome(); request(); stage.focus(); };
+    planeBtns[p] = b; g("vplanes").append(b);
+  }
+  /* Probed once rather than on click, so an unsupported browser says so before you
+     press it instead of showing a black rectangle. */
+  const has3d = !!document.createElement("canvas").getContext("webgl2");
+  const b3d = $(`<button class="ghost">3D</button>`);
+  if (!has3d) { b3d.disabled = true; b3d.title = "this browser has no WebGL2"; }
+  b3d.onclick = () => { S.mode = "3d"; paintChrome(); request(); };
+  g("vplanes").append(b3d);
+  for (const k of Object.keys(st.presets)) {
+    const b = $(`<button class="ghost">${esc(k)}</button>`);
+    b.onclick = () => { [S.ww, S.wl] = st.presets[k]; paintChrome(); request(); };
+    preBtns[k] = b; g("vpre").append(b);
+  }
+  function paintChrome() {
+    const gm = st.planes[S.plane];
+    const sl = g("vsl");
+    sl.max = gm.n - 1; sl.value = S.idx[S.plane];
+    const d3 = S.mode === "3d";
+    b3d.classList.toggle("ghost", !d3);
+    g("vimg").classList.toggle("hide", d3);
+    sl.classList.toggle("hide", d3);
+    g("vpre").classList.toggle("hide", d3);
+    if (cv3d) cv3d.classList.toggle("hide", !d3);
+    g("vop").value = d3 ? S.op3 : S.op;
+    g("vopv").textContent = (d3 ? S.op3 : S.op) + "%";
+    if (d3) {
+      g("vlabel").textContent = label3d;
+      for (const p of PL) planeBtns[p].classList.add("ghost");
+      return;
+    }
+    for (const p of PL) planeBtns[p].classList.toggle("ghost", p !== S.plane);
+    for (const k of Object.keys(st.presets))
+      preBtns[k].classList.toggle("ghost",
+        !(st.presets[k][0] === Math.round(S.ww) && st.presets[k][1] === Math.round(S.wl)));
+    g("vlabel").textContent = `${S.plane} ${S.idx[S.plane] + 1} / ${gm.n} · ` +
+      `${gm.dir} · W ${Math.round(S.ww)} L ${Math.round(S.wl)}`;
+  }
+
+  /* ---- the image. One request in flight; the newest wanted URL wins when it lands.
+     A timer debounce would either lag behind a fast drag or flood a slow one; this
+     self-paces to whatever the server is actually managing. */
+  const stage = g("vstage"), img = g("vimg"), busy = g("vbusy");
+  let inflight = null, want = null, shown = "", busyT = null, dead = false;
+
+  const sliceURL = (i) =>
+    "/api/view/slice.png?name=" + encodeURIComponent(name) +
+    "&case=" + encodeURIComponent(cse) + "&plane=" + S.plane +
+    "&i=" + (i === undefined ? S.idx[S.plane] : i) +
+    "&ww=" + Math.round(S.ww) + "&wl=" + Math.round(S.wl) + "&op=" + S.op +
+    "&v=" + encodeURIComponent(vparam()) + "&s=" + st.stamp +
+    "&token=" + encodeURIComponent(TOKEN);
+  function vparam() {
+    const out = [];
+    for (const L of st.layers) {
+      const b = bits.get(L.task);
+      if (b.some(x => x)) out.push(L.task + ":" +
+        Array.from(b, x => x.toString(16).padStart(2, "0")).join(""));
+    }
+    return out.join(",");
+  }
+  function showBusy(on) {
+    clearTimeout(busyT);
+    if (on) busyT = setTimeout(() => busy.classList.remove("hide"), 150);
+    else busy.classList.add("hide");
+  }
+  function sizeSlice() {
+    const gm = st.planes[S.plane], box = stage.getBoundingClientRect();
+    /* One scale for both axes, from millimetres rather than pixels - that is what
+       stops an anisotropic coronal from coming out squashed. */
+    const s = Math.min((box.width - 20) / gm.mm_w, (box.height - 20) / gm.mm_h);
+    img.style.width = (gm.mm_w * s) + "px";
+    img.style.height = (gm.mm_h * s) + "px";
+  }
+  function fire(url) {
+    const im = inflight = new Image();
+    im.onload = () => {
+      inflight = null;
+      img.src = im.src;             /* already decoded and cached: no blank frame */
+      shown = url; sizeSlice(); showBusy(false);
+      if (want && want !== shown) fire(want); else preload();
+    };
+    im.onerror = () => {
+      inflight = null; showBusy(false);
+      if (!dead) { dead = true; g("vhead").append(err(new Error(
+        "that slice could not be drawn - the files may have been rewritten by a run. " +
+        "Reload the page."))); }
+    };
+    im.src = url; showBusy(true);
+  }
+  function request() {
+    if (S.mode === "3d") { paintChrome(); return request3d(); }
+    const url = sliceURL();
+    paintChrome();
+    if (url === shown) return;
+    want = url;
+    if (!inflight) fire(want);
+  }
+  /* ---- 3d mode. The sidebar, the bitsets and request() are all shared with the
+     slice view, so the same eye icons drive both and switching tabs keeps your
+     selection. What differs is that a structure is fetched once and then lives on the
+     GPU, so toggling one back on costs nothing. */
+  const MAX3D = 48;
+  let v3d = null, cv3d = null, label3d = "", q3d = [], busy3d = 0, done3d = 0, cap3d = null;
+
+  function want3d() {
+    const out = [];
+    for (const L of st.layers)
+      for (const sg of L.segments)
+        if (isOn(L.task, sg.i))
+          out.push({task: L.task, i: sg.i, color: sg.color, key: L.task + "/" + sg.i});
+    return out;
+  }
+  function meshURL(w) {
+    return "/api/view/mesh.bin?name=" + encodeURIComponent(name) +
+      "&case=" + encodeURIComponent(cse) + "&task=" + encodeURIComponent(w.task) +
+      "&i=" + w.i + "&s=" + st.stamp + "&token=" + encodeURIComponent(TOKEN);
+  }
+  function note3d(text) {
+    if (cap3d) { cap3d.remove(); cap3d = null; }
+    if (text) { cap3d = $(`<div class="vcap">${esc(text)}</div>`); stage.append(cap3d); }
+  }
+  function request3d() {
+    if (!v3d) {
+      cv3d = $(`<canvas class="v3d" id="v3d"></canvas>`);
+      stage.append(cv3d);
+      v3d = makeViewer3D(cv3d);
+      if (!v3d.ok) { note3d("This browser cannot show 3D (no WebGL2)."); return; }
+      v3d.resize();
+    }
+    if (!v3d.ok) return;
+    const want = want3d();
+    if (want.length > MAX3D) {
+      /* An arbitrary 48 of 117 is not a useful picture, so nothing is fetched and the
+         message names the two controls that fix it - both of which already exist. */
+      note3d("3D shows up to " + MAX3D + " structures at once, and " + want.length +
+             " are switched on. Narrow it with the search box, or shift-click one " +
+             "structure to show just that.");
+      return;
+    }
+    note3d("");
+    const keep = new Set(want.map(w => w.key));
+    for (const k of v3d.keys()) if (!keep.has(k)) v3d.drop(k);
+    v3d.setOpacity(S.op3 / 100);
+    q3d = want.filter(w => !v3d.has(w.key));
+    done3d = 0;
+    pump3d();
+    v3d.invalidate();
+    tick3d();
+  }
+  function pump3d() {
+    /* Four at a time: enough to use the cores, and they all block on the same cache
+       entry for the underlying .seg.nrrd so it is still read exactly once. */
+    while (busy3d < 4 && q3d.length) {
+      const w = q3d.shift();
+      busy3d++;
+      fetch(meshURL(w), {headers: {"X-Token": TOKEN}})
+        .then(r => r.ok ? r.arrayBuffer() : r.json().then(j => { throw new Error(j.error); }))
+        .then(buf => { if (v3d && S.mode === "3d") v3d.add(w.key, buf, w.color); })
+        .catch(e => {
+          if (!dead) { dead = true; g("vhead").append(err(new Error(
+            String(e.message || e).replace(/^\w*Error: /, "")))); }
+        })
+        .finally(() => { busy3d--; done3d++; pump3d(); tick3d(); });
+    }
+  }
+  function tick3d() {
+    const left = q3d.length + busy3d;
+    label3d = left
+      ? "building surfaces… " + done3d + " / " + (done3d + left)
+      : "3D · " + v3d.keys().length + " structures · " +
+        Math.round(v3d.triangles() / 1000) + "k triangles · drag to spin, " +
+        "shift-drag to pan, scroll to zoom";
+    if (S.mode === "3d") g("vlabel").textContent = label3d;
+  }
+
+  function preload() {
+    const n = st.planes[S.plane].n;
+    for (const d of [1, -1, 2, -2]) {
+      const j = S.idx[S.plane] + d;
+      if (j >= 0 && j < n) new Image().src = sliceURL(j);
+    }
+  }
+  const step = (d) => {
+    const n = st.planes[S.plane].n;
+    S.idx[S.plane] = Math.max(0, Math.min(n - 1, S.idx[S.plane] + d));
+    request();
+  };
+
+  g("vsl").oninput = (e) => { S.idx[S.plane] = +e.target.value; request(); };
+  g("vop").oninput = (e) => {
+    const v = +e.target.value;
+    if (S.mode === "3d") { S.op3 = v; } else { S.op = v; }
+    g("vopv").textContent = v + "%";
+    request();
+  };
+  stage.addEventListener("wheel", (e) => {
+    if (S.mode === "3d") return;   /* the canvas has its own wheel handler */
+    e.preventDefault();            /* the page must not scroll under the cursor */
+    step(Math.sign(e.deltaY));
+  }, {passive: false});
+  stage.onkeydown = (e) => {
+    const k = e.key;
+    if (k === "4") { S.mode = "3d"; paintChrome(); request(); e.preventDefault(); return; }
+    if (S.mode === "3d") return;
+    if (k === "ArrowDown" || k === "ArrowRight") step(1);
+    else if (k === "ArrowUp" || k === "ArrowLeft") step(-1);
+    else if (k === "PageDown") step(10);
+    else if (k === "PageUp") step(-10);
+    else if (k === "Home") { S.idx[S.plane] = 0; request(); }
+    else if (k === "End") { S.idx[S.plane] = st.planes[S.plane].n - 1; request(); }
+    else if ("123".includes(k)) { S.plane = PL[+k - 1]; paintChrome(); request(); }
+    else return;
+    e.preventDefault();
+  };
+
+  /* Window/level by dragging, the way every PACS does it: across for width, up and
+     down for level. */
+  let drag = null;
+  stage.onpointerdown = (e) => {
+    if (S.mode === "3d") return;
+    drag = {x: e.clientX, y: e.clientY, ww: S.ww, wl: S.wl};
+    stage.setPointerCapture(e.pointerId); stage.focus();
+  };
+  stage.onpointermove = (e) => {
+    if (!drag) return;
+    S.ww = Math.max(1, Math.min(4000, drag.ww + (e.clientX - drag.x) * 4));
+    S.wl = Math.max(-1200, Math.min(3000, drag.wl - (e.clientY - drag.y) * 4));
+    request();
+  };
+  const endDrag = (e) => {
+    if (!drag) return;
+    drag = null;
+    try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  stage.onpointerup = endDrag;
+  stage.onpointercancel = endDrag;
+  stage.ondblclick = () => { [S.ww, S.wl] = st.presets[st.default]; request(); };
+
+  /* The page is torn down by rewriting #view, which cannot detach this, so it checks
+     whether it is still on screen and unhooks itself when it is not. */
+  const onResize = () => {
+    if (!document.body.contains(stage)) {
+      window.removeEventListener("resize", onResize);
+      if (v3d && v3d.ok) v3d.dispose();       /* release the GL context with the page */
+      v3d = null;
+    } else {
+      sizeSlice();
+      if (v3d && v3d.ok) v3d.resize();
+    }
+  };
+  window.addEventListener("resize", onResize);
+
+  syncTree(); paintChrome(); request(); stage.focus();
 }
 
 document.getElementById("navHome").onclick = () => nav("home");

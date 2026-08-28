@@ -33,7 +33,7 @@ import threading
 import time
 import traceback
 import webbrowser
-from collections import deque
+from collections import deque, OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, quote
@@ -894,6 +894,516 @@ def fossa_floor_png(group, case):
     return buf.getvalue()
 
 
+# --------------------------------------------------------------- slice viewer
+# Enough of a viewer to answer "did that segmentation work" without opening Slicer.
+# The compositing happens here rather than in the browser: the volumes are already on
+# this machine, numpy is quick enough at one slice, and sending a finished PNG keeps
+# the page down to an <img> and a slider instead of a WebGL dependency.
+
+# Window width and level, in HU. Bone leads because most of what this pipeline
+# segments is skull, and a soft-tissue window makes a bone boundary impossible to
+# judge. Sent to the page so the numbers live in exactly one place.
+WINDOW_PRESETS = {"bone": [2500, 480], "soft tissue": [400, 50], "brain": [80, 40]}
+
+PLANES = ("axial", "coronal", "sagittal")
+_PLANE_AXIS = {"axial": 2, "coronal": 1, "sagittal": 0}
+
+# Volumes are slow to read and a slider asks for one slice per step, so they are held
+# in memory. The key carries mtime and size, which means a pipeline re-run produces a
+# new key by itself - nothing here ever has to be invalidated by hand.
+_VC = OrderedDict()
+_VC_LOAD = {}
+_VC_LOCK = threading.Lock()     # covers _VC and _VC_LOAD only; the job LOCK is
+                                # bookkeeping for something else entirely
+_VC_BUDGET = int(os.environ.get("CT_VIEW_CACHE_MB", "1500")) * 1024 * 1024
+_VC_ITEM_MAX = 1200 * 1024 * 1024
+
+
+def _stamp(path):
+    """Identity plus freshness, so a rewritten file can never be served from cache."""
+    st = path.stat()
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def _cached(key, loader, store=None, budget=None):
+    """loader() -> (value, nbytes), called at most once per key across threads.
+
+    store/budget pick which LRU this lives in - volumes and meshes have separate ones
+    so a few dozen meshes cannot evict the CT they were made from.
+
+    The load runs outside the lock. It can take seconds on a large volume, and holding
+    the lock across it would stall every other request, including the ones that were
+    about to hit the cache. A second thread asking for the same key waits on an event
+    instead of reading the same file again.
+    """
+    store = _VC if store is None else store
+    budget = _VC_BUDGET if budget is None else budget
+    while True:
+        with _VC_LOCK:
+            if key in store:
+                store.move_to_end(key)
+                return store[key][0]
+            ev = _VC_LOAD.get(key)
+            if ev is None:
+                ev = _VC_LOAD[key] = threading.Event()
+                break                     # this thread owns the load
+        if not ev.wait(timeout=300):
+            raise RuntimeError("timed out waiting for this volume to load")
+    try:
+        val, n = loader()
+        if n > _VC_ITEM_MAX:
+            raise RuntimeError(
+                f"this volume needs {n / 2 ** 30:.1f} GB of memory, which is more than "
+                "this viewer will take on - open it in 3D Slicer instead")
+        with _VC_LOCK:
+            store[key] = (val, n)
+            total = sum(v[1] for v in store.values())
+            while total > budget and len(store) > 1:
+                total -= store.popitem(last=False)[1][1]
+        return val
+    finally:
+        # Set the event whatever happened. A load that failed without waking its
+        # waiters would hang every later request for that file for the timeout.
+        with _VC_LOCK:
+            _VC_LOAD.pop(key, None)
+        ev.set()
+
+
+def slice2d(arr, plane, i):
+    """One 2-D slice of a canonical RAS volume, oriented the way it is displayed.
+
+    Written once and used for the CT and for every label array, so the two cannot
+    drift apart by a flip. Axial and coronal are radiological - the patient's right is
+    on the viewer's left - and sagittal faces left, superior up.
+    """
+    if plane == "axial":
+        return arr[::-1, ::-1, i].T      # rows: A at top    cols: patient R at left
+    if plane == "coronal":
+        return arr[::-1, i, ::-1].T      # rows: S at top    cols: patient R at left
+    return arr[i, ::-1, ::-1].T          # rows: S at top    cols: A at left
+
+
+def _ct_path(group, case):
+    d = nifti_dir_for(group) / case
+    hits = sorted(d.glob("*.nii.gz")) if d.is_dir() else []
+    if not hits:
+        raise RuntimeError("this case has not been converted yet - run Check series "
+                           "first, or segment it, then come back")
+    return hits[0]                       # the same one find_source_nifti picks
+
+
+def _canonical_geometry(affine, shape, zooms):
+    """Shape, zooms and affine after reorientation to RAS, without touching voxels."""
+    import nibabel as nib
+    ornt = nib.orientations.io_orientation(affine)
+    perm = [int(a) for a in ornt[:, 0]]
+    return ([int(shape[a]) for a in perm], [float(zooms[a]) for a in perm],
+            affine @ nib.orientations.inv_ornt_aff(ornt, tuple(shape)))
+
+
+def _ct_volume(group, case):
+    """The CT in canonical RAS as int16 HU, cached."""
+    import numpy as np
+    import nibabel as nib
+    p = _ct_path(group, case)
+
+    def load():
+        img = nib.as_closest_canonical(nib.load(str(p)))
+        # int16 rather than the float the scaling produces: HU always fits, and the
+        # difference is 150 MB against 300 MB for an ordinary head CT.
+        vol = np.asanyarray(img.dataobj, dtype=np.int16)
+        return ({"vol": vol, "aff": img.affine,
+                 "zooms": [float(z) for z in img.header.get_zooms()[:3]]}, vol.nbytes)
+
+    return _cached(("ct",) + _stamp(p), load)
+
+
+def _seg_files(group, case):
+    """Every .seg.nrrd for this case as (label, path), in the order to paint them.
+
+    A glob rather than case_status(), which only reports stems that are known task
+    names and so silently leaves out cranial_bones, brain_icv and the fossae file.
+    Painted big to small, so total ends up underneath the structures worth seeing.
+    """
+    d = seg_dir_for(group) / case
+    if not d.is_dir():
+        return []
+    rank = {"total": 0, "brain_structures": 2, "cranial_bones": 3, "brain_icv": 4}
+    out = []
+    for p in sorted(d.glob("*.seg.nrrd")):
+        stem = p.name[: -len(".seg.nrrd")]
+        label = stem[len(case) + 1:] if stem.startswith(case + "_") else stem
+        out.append((5 if "fossae" in label else rank.get(label, 1), label, p))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return [(label, p) for _, label, p in out]
+
+
+def _hex_color(s):
+    """A header's "r g b" floats as #rrggbb. Read rather than recomputed, so what the
+    browser draws is the colour Slicer draws."""
+    try:
+        rgb = [float(v) for v in str(s).split()]
+        if len(rgb) != 3:
+            raise ValueError
+    except ValueError:
+        return "#c8b48c"
+    return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(v * 255)))) for v in rgb)
+
+
+def _seg_segments(hdr):
+    """[{i, name, value, layer, color}] from a .seg.nrrd header.
+
+    The index is the identity used everywhere downstream - in the URL, in the colour
+    table, in the DOM - because it is the one thing well defined for both file shapes
+    this pipeline writes. brain_icv gives every segment LabelValue 1 and separates
+    them by layer instead, so a label value on its own cannot name a segment.
+    """
+    def _int_or(key, default):
+        try:
+            return int(hdr[key])
+        except (KeyError, TypeError, ValueError):
+            return default
+
+    segs, i = [], 0
+    while f"Segment{i}_Name" in hdr:
+        segs.append({"i": i, "name": str(hdr[f"Segment{i}_Name"]),
+                     "value": _int_or(f"Segment{i}_LabelValue", i + 1),
+                     "layer": _int_or(f"Segment{i}_Layer", 0),
+                     "color": _hex_color(hdr.get(f"Segment{i}_Color", ""))})
+        i += 1
+    return segs
+
+
+def _seg_affine(hdr):
+    """The RAS affine and voxel shape a .seg.nrrd header describes.
+
+    space directions and space origin are LPS, because that is what Slicer reads;
+    undoing the flip multilabel_to_segnrrd applied puts it back alongside the CT's
+    nibabel affine. A 4-D file carries a [nan nan nan] row for its layer axis.
+    """
+    import numpy as np
+    dirs = np.array(hdr["space directions"], dtype=float)
+    sizes = [int(v) for v in hdr["sizes"]]
+    if dirs.shape[0] == 4:
+        dirs, sizes = dirs[1:], sizes[1:]
+    aff = np.eye(4)
+    aff[:3, :3] = dirs.T
+    aff[:3, 3] = np.array(hdr["space origin"], dtype=float)
+    aff[0, :] *= -1
+    aff[1, :] *= -1
+    return aff, sizes
+
+
+def _grid_matches(hdr, ct_shape, ct_aff):
+    """Whether this segmentation already sits on the CT's grid - header only, no read."""
+    import numpy as np
+    aff, sizes = _seg_affine(hdr)
+    shape, _, oaff = _canonical_geometry(aff, sizes, [1.0, 1.0, 1.0])
+    return shape == list(ct_shape) and np.allclose(oaff, ct_aff, atol=1e-3)
+
+
+def _seg_volume(group, case, path):
+    """The segmentation as one array whose value is the segment index plus one.
+
+    Both file shapes collapse into this. A 3-D multilabel file is remapped from label
+    values to indices; brain_icv's 4-D file stacks one binary layer per segment on
+    axis 0, and painting those in layer order leaves brain sitting inside ICV rather
+    than one erasing the other. Everything downstream then indexes a colour table with
+    the array value and needs to know nothing about which kind of file it came from.
+    """
+    import numpy as np
+    import nibabel as nib
+    import nrrd
+    ct = _ct_volume(group, case)
+
+    def load():
+        data, hdr = nrrd.read(str(path), index_order="F")
+        segs = _seg_segments(hdr)
+        aff, _ = _seg_affine(hdr)
+        layers = ([np.asarray(data[k]) for k in range(data.shape[0])]
+                  if data.ndim == 4 else [np.asarray(data)])
+        out = np.zeros(layers[0].shape,
+                       dtype=np.uint8 if len(segs) < 255 else np.uint16)
+        for s in sorted(segs, key=lambda s: s["layer"]):
+            lay = layers[s["layer"]] if data.ndim == 4 else layers[0]
+            out[lay == s["value"]] = s["i"] + 1
+        ornt = nib.orientations.io_orientation(aff)
+        oaff = aff @ nib.orientations.inv_ornt_aff(ornt, layers[0].shape)
+        out = nib.orientations.apply_orientation(out, ornt)
+        if out.shape != ct["vol"].shape or not np.allclose(oaff, ct["aff"], atol=1e-3):
+            out = _resample_labels(out, oaff, ct)
+        return {"vol": out, "segs": segs}, out.nbytes
+
+    return _cached(("seg",) + _stamp(path) + _stamp(_ct_path(group, case)), load)
+
+
+def _resample_labels(lab, laff, ct):
+    """Nearest neighbour onto the CT's grid. order=0 is not a speed choice: anything
+    that interpolates invents label values naming structures that were never there."""
+    import numpy as np
+    from scipy import ndimage
+    try:
+        m = np.linalg.inv(laff) @ ct["aff"]
+    except np.linalg.LinAlgError:
+        raise RuntimeError("this segmentation's grid cannot be lined up with the CT")
+    if not np.all(np.isfinite(m)):
+        raise RuntimeError("this segmentation's grid cannot be lined up with the CT")
+    return ndimage.affine_transform(lab, m[:3, :3], offset=m[:3, 3],
+                                    output_shape=ct["vol"].shape, order=0,
+                                    mode="constant", cval=0,
+                                    prefilter=False).astype(lab.dtype)
+
+
+def view_case(group, case):
+    """Everything the viewer needs to draw its chrome, without reading a voxel.
+
+    nibabel loads lazily and pynrrd will read a header on its own, so this stays in
+    milliseconds even for total, whose labels are 80 MB. The page is therefore up and
+    interactive before the first slice has been asked for.
+    """
+    import nibabel as nib
+    import nrrd
+    p = _ct_path(group, case)
+    img = nib.load(str(p))
+    shape, zooms, aff = _canonical_geometry(img.affine, img.shape[:3],
+                                            img.header.get_zooms()[:3])
+    (nx, ny, nz), (zx, zy, zz) = shape, zooms
+    planes = {
+        "axial": {"n": nz, "w": nx, "h": ny, "mm_w": nx * zx, "mm_h": ny * zy,
+                  "dir": "I → S"},
+        "coronal": {"n": ny, "w": nx, "h": nz, "mm_w": nx * zx, "mm_h": nz * zz,
+                    "dir": "P → A"},
+        "sagittal": {"n": nx, "w": ny, "h": nz, "mm_w": ny * zy, "mm_h": nz * zz,
+                     "dir": "L → R"},
+    }
+    layers, warnings, stamps = [], [], [p.stat().st_mtime_ns]
+    for label, sp in _seg_files(group, case):
+        stamps.append(sp.stat().st_mtime_ns)
+        try:
+            hdr = nrrd.read_header(str(sp))
+            segs = _seg_segments(hdr)
+            status = "ok" if _grid_matches(hdr, shape, aff) else "resample"
+        except Exception as e:
+            # One unreadable file must not cost you the rest of the case.
+            warnings.append(f"{sp.name} could not be read: {e}")
+            continue
+        if not segs:
+            continue
+        if status == "resample":
+            warnings.append(f"{label} sits on a different grid to the CT, so it is "
+                            "resampled to match - boundaries may be a voxel out")
+        layers.append({"task": label, "status": status,
+                       "segments": [{"i": s["i"], "name": s["name"],
+                                     "color": s["color"]} for s in segs]})
+    return {"project": group, "case": case, "shape": shape, "zooms": zooms,
+            "planes": planes, "presets": WINDOW_PRESETS, "default": "bone",
+            "stamp": max(stamps), "layers": layers, "warnings": warnings}
+
+
+def _qint(q, key, default):
+    """A query integer that falls back rather than 500s - these arrive from a slider
+    and a drag, and a half-typed value is not worth an error page."""
+    try:
+        return int(float(q.get(key, "")))
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_visible(s):
+    """"total:1f0a,brain_structures:ff03" -> {task: bitset over segment index}.
+
+    A bitset rather than a list of names because total has 117 structures: 15 bytes of
+    hex against a kilometre of URL, and it keeps the address a stable cache key, which
+    is what lets the browser re-show a slice it has already seen without asking.
+    """
+    out = {}
+    for part in (s or "").split(","):
+        name, sep, bits = part.partition(":")
+        if not sep:
+            continue
+        try:
+            out[name] = bytes.fromhex(bits)
+        except ValueError:
+            continue
+    return out
+
+
+def view_slice_png(group, case, plane, i, ww, wl, op, vis):
+    """One composited slice as PNG bytes: CT windowed to grey, structures blended on."""
+    import io
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    ct = _ct_volume(group, case)
+    n = ct["vol"].shape[_PLANE_AXIS[plane]]
+    i = max(0, min(n - 1, i))            # clamp rather than fail: a stale index from a
+    sl = slice2d(ct["vol"], plane, i)    # re-fetched case must not break the view
+    ww = max(1.0, float(ww))
+    lo = float(wl) - ww / 2.0
+    g = np.clip((sl.astype(np.float32) - lo) * (255.0 / ww), 0, 255).astype(np.uint8)
+    rgb = np.repeat(g[:, :, None], 3, axis=2)
+
+    a = max(0.0, min(1.0, op / 100.0))
+    for label, sp in (_seg_files(group, case) if a > 0 else []):
+        want = vis.get(label)
+        if not want or not any(want):
+            continue
+        try:
+            seg = _seg_volume(group, case, sp)
+        except Exception:
+            traceback.print_exc()        # one bad layer, not a blank viewer
+            continue
+        keep = np.zeros(len(seg["segs"]) + 1, dtype=bool)
+        lut = np.zeros((len(seg["segs"]) + 1, 3), dtype=np.uint8)
+        for s in seg["segs"]:
+            byte = s["i"] // 8
+            if byte < len(want) and (want[byte] >> (s["i"] % 8)) & 1:
+                keep[s["i"] + 1] = True
+            c = s["color"].lstrip("#")
+            lut[s["i"] + 1] = [int(c[k:k + 2], 16) for k in (0, 2, 4)]
+        lab = slice2d(seg["vol"], plane, i)
+        m = keep[lab]
+        if m.any():
+            # Fancy-indexed so the work tracks the painted area, not the frame.
+            rgb[m] = (rgb[m] * (1 - a) + lut[lab[m]] * a).astype(np.uint8)
+
+    buf = io.BytesIO()
+    plt.imsave(buf, rgb, format="png")   # 3-channel uint8 passes straight through
+    return buf.getvalue()
+
+
+# ------------------------------------------------------------------ 3d surfaces
+# Scrolling slices tells you whether a boundary is right. It does not tell you whether
+# a structure came out the right shape - a segmentation that leaked into the next lobe
+# is obvious the moment you spin it and easy to miss slice by slice. So: marching cubes
+# here, a small WebGL viewer in the page, and nothing else. Not a replacement for
+# Slicer, which is still where you go to fix anything.
+
+MESH_MAGIC = b"MSH1"
+MESH_MAX_TRIS = 1_200_000
+
+# Meshes get their own budget rather than sharing the volume cache. A mesh is a couple
+# of megabytes and a CT is two hundred, so a few dozen meshes in one LRU would push the
+# CT out and the next slice would re-read it from disk - a viewer that gets slower the
+# more you use it.
+_MC = OrderedDict()
+_MC_BUDGET = int(os.environ.get("CT_MESH_CACHE_MB", "256")) * 1024 * 1024
+
+
+def _pool(a, d):
+    """Downsample a boolean mask to fractional occupancy by block mean.
+
+    Not point-sampling, which is what a[::2] and marching_cubes(step_size=2) both do:
+    a skull table one voxel thick falls between the samples and vanishes. Averaging
+    keeps it as partial occupancy, and being a box prefilter it also comes out smoother
+    than marching a binary mask, so no separate smoothing pass is needed.
+    """
+    import numpy as np
+    if d == 1:
+        return a.astype(np.float32)
+    s = [n - n % d for n in a.shape]
+    b = a[:s[0], :s[1], :s[2]].astype(np.float32)
+    return b.reshape(s[0] // d, d, s[1] // d, d, s[2] // d, d).mean(axis=(1, 3, 5))
+
+
+def _pack_mesh(verts, normals, faces, d):
+    """The wire format, gzipped:
+
+        "MSH1" | nverts u32 | ntris u32 | d u32 | bbox_min 3f | bbox_max 3f
+              | verts f32[n*3] | normals f32[n*3] | faces u32[t*3]
+
+    Binary because a structure is tens of thousands of triangles and the same thing as
+    JSON would be several times the bytes and a few hundred milliseconds of parsing.
+    The bounding box rides in the header so the page can frame the camera without
+    scanning the vertices. gzip level 1 is about four times smaller for five
+    milliseconds, which is the whole bandwidth question answered without quantising.
+    """
+    import gzip
+    import struct
+    import numpy as np
+    if len(verts):
+        lo, hi = verts.min(0), verts.max(0)
+    else:
+        lo = hi = np.zeros(3, np.float32)
+    head = struct.pack("<4sIII6f", MESH_MAGIC, len(verts), len(faces), d,
+                       float(lo[0]), float(lo[1]), float(lo[2]),
+                       float(hi[0]), float(hi[1]), float(hi[2]))
+    return gzip.compress(head + verts.astype(np.float32).tobytes()
+                         + normals.astype(np.float32).tobytes()
+                         + faces.astype(np.uint32).tobytes(), 1)
+
+
+def view_mesh(group, case, task, index):
+    """One structure's surface in millimetres, as a gzipped binary blob.
+
+    One structure per request rather than all the visible ones together: the page can
+    draw the first surface while the rest are still being built, toggling one eye does
+    not re-transfer the others, and a structure that fails costs only itself.
+    """
+    import numpy as np
+    from scipy import ndimage
+    from skimage import measure
+
+    hit = [p for label, p in _seg_files(group, case) if label == task]
+    if not hit:
+        raise RuntimeError(f"no segmentation called {task!r} for this case")
+    path = hit[0]
+
+    def load():
+        seg = _seg_volume(group, case, path)
+        if not any(s["i"] == index for s in seg["segs"]):
+            raise RuntimeError(f"{task} has no structure {index}")
+        zx, zy, zz = _ct_volume(group, case)["zooms"]
+        m = seg["vol"] == index + 1
+        empty = (np.zeros((0, 3), np.float32),) * 2 + (np.zeros((0, 3), np.uint32),)
+        if not m.any():
+            # A task can legitimately contain a structure this patient does not have.
+            blob = _pack_mesh(*empty, 1)
+            return blob, len(blob)
+
+        # Crop to the structure before doing anything expensive. A brain occupies
+        # maybe an eighth of the scan, and marching cubes costs what you hand it.
+        ax = [np.flatnonzero(m.any(axis=(1, 2))), np.flatnonzero(m.any(axis=(0, 2))),
+              np.flatnonzero(m.any(axis=(0, 1)))]
+        lo = [int(a[0]) for a in ax]
+        sub = m[lo[0]:int(ax[0][-1]) + 1, lo[1]:int(ax[1][-1]) + 1,
+                lo[2]:int(ax[2][-1]) + 1]
+        d = 1 if sub.size <= 8_000_000 else 2 if sub.size <= 64_000_000 else 3
+        sp = np.array([zx * d, zy * d, zz * d], dtype=np.float32)
+
+        # Blur the mask into fractional occupancy before marching. Marching a boolean
+        # straight gives a terraced surface - you see the slice thickness as rings,
+        # which reads as anatomy and is not. Sigma is set in millimetres and converted
+        # per axis, so a scan with 5 mm slices gets the smoothing it actually needs
+        # along z rather than the same voxel count as a 0.4 mm axis.
+        sig_mm = 0.8 * max(zx, zy, zz)
+        occ = ndimage.gaussian_filter(_pool(sub, d), 
+                                      sigma=[sig_mm / (zx * d), sig_mm / (zy * d),
+                                             sig_mm / (zz * d)], mode="constant")
+        # The zero pad closes anything running off the edge of the scan; without it a
+        # structure the field of view clipped renders as an open shell you see into.
+        # level below 0.5 because blurring pulls a thin sheet's peak down, and losing
+        # a one-voxel bone table matters more than half a voxel of dilation.
+        try:
+            v, f, n, _ = measure.marching_cubes(np.pad(occ, 1), level=0.42,
+                                                spacing=tuple(sp), step_size=1,
+                                                allow_degenerate=False)
+        except (ValueError, RuntimeError):
+            blob = _pack_mesh(*empty, d)
+            return blob, len(blob)
+        if len(f) > MESH_MAX_TRIS:
+            raise RuntimeError("this structure is too detailed to show in 3D - "
+                               "open the .seg.nrrd in 3D Slicer instead")
+        v = v.astype(np.float32) - sp                      # undo the pad
+        v += np.array([lo[0] * zx, lo[1] * zy, lo[2] * zz], dtype=np.float32)
+        blob = _pack_mesh(v, n, f, d)
+        return blob, len(blob)
+
+    return _cached(("mesh",) + _stamp(path) + _stamp(_ct_path(group, case)) + (index,),
+                   load, store=_MC, budget=_MC_BUDGET)
+
+
 def job_fossa_apply(project, case, edits):
     """Save the trace, then re-run the ordinary pipeline for that case. Running the CLI
     rather than importing keeps torch out of the server; segment_fossae picks the trace
@@ -932,7 +1442,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        # no-store unless the caller asked for something else - slice images are
+        # addressed by a URL carrying the file's mtime, so they are safe to cache and
+        # scrubbing back over slices already seen should not hit the server at all.
+        if not any(k.lower() == "cache-control" for k in (extra or {})):
+            self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -966,6 +1480,14 @@ class Handler(BaseHTTPRequestHandler):
         if not load_project(name):
             raise RuntimeError(f"unknown project: {name}")
         return name
+
+    def _case(self, q):
+        """A case name that is a name, not a path. Everything built from it is joined
+        onto the project's own folders, so a stray slash must not get through."""
+        case = q.get("case", "")
+        if not SAFE_NAME.match(case):
+            raise RuntimeError(f"not a case name: {case!r}")
+        return case
 
     def do_GET(self):
         u = urlparse(self.path)
@@ -1032,6 +1554,26 @@ class Handler(BaseHTTPRequestHandler):
                 if not hits:
                     return self._json({"error": "no map yet"}, 404)
                 return self._send(200, hits[0].read_bytes(), "image/png")
+            if u.path == "/api/view/case":
+                return self._json(view_case(self._project(q), self._case(q)))
+            if u.path == "/api/view/slice.png":
+                plane = q.get("plane", "axial")
+                png = view_slice_png(
+                    self._project(q), self._case(q),
+                    plane if plane in PLANES else "axial",
+                    _qint(q, "i", 0), _qint(q, "ww", 2500), _qint(q, "wl", 480),
+                    _qint(q, "op", 45), _parse_visible(q.get("v", "")))
+                # Safe to cache: the URL carries the files' mtime, so a re-run gives a
+                # different address. This is what makes scrubbing back free.
+                return self._send(200, png, "image/png",
+                                  {"Cache-Control": "private, max-age=300"})
+            if u.path == "/api/view/mesh.bin":
+                blob = view_mesh(self._project(q), self._case(q),
+                                 q.get("task", ""), _qint(q, "i", -1))
+                # Already gzipped by view_mesh, so the browser is told to inflate it.
+                return self._send(200, blob, "application/octet-stream",
+                                  {"Cache-Control": "private, max-age=300",
+                                   "Content-Encoding": "gzip"})
             if u.path == "/api/download":
                 name = self._project(q)
                 f = (seg_dir_for(name) / q.get("file", "")).resolve()
@@ -1178,8 +1720,10 @@ def selftest():
     print(f"interpreter : {sys.executable}")
     print(f"app folder  : {APP}")
     print(f"projects    : {PROJECTS}")
+    # xmltodict is in here because TotalSegmentator imports it but does not require
+    # it: without it a segmentation runs to the end and then writes no .seg.nrrd.
     for mod in ("pydicom", "dicom2nifti", "nibabel", "numpy", "matplotlib", "nrrd",
-                "pandas", "totalsegmentator", "torch"):
+                "pandas", "xmltodict", "skimage", "totalsegmentator", "torch"):
         try:
             __import__(mod)
             print(f"  ok      {mod}")
