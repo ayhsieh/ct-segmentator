@@ -26,3 +26,7 @@ __pycache__/
 ct_gui.log
 miniconda/
 miniconda-installer.sh
+
+# public sample CTs, fetched by samples/fetch.sh rather than committed
+/samples/*.nii.gz
+.DS_Store
