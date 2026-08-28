@@ -141,7 +141,42 @@ def license_stored():
 # one is a request thread, and a dialog that hangs then cannot take the server with it.
 _PICKER = r"""
 import sys, tkinter, tkinter.filedialog
+
 r = tkinter.Tk(); r.withdraw()
+r.update()                          # realise the app before asking to be brought forward
+
+if sys.platform == "darwin":
+    # -topmost raises the window, but on macOS that is not the same as activating the
+    # application, and an unactivated one just bounces in the Dock: the dialog is up,
+    # behind the browser, and has to be found by hand. Only the app itself can fix
+    # that, by calling NSApplication activateIgnoringOtherApps:. Reached through the
+    # Objective-C runtime because Tk already links AppKit and pyobjc is not a
+    # dependency worth adding for one call. Doing it through AppleScript and System
+    # Events works too, but triggers a one-time "wants to control System Events"
+    # permission prompt, which is worse than the bug for the people this is built for.
+    def _activate():
+        try:
+            import ctypes, ctypes.util
+            objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+            objc.objc_getClass.restype = ctypes.c_void_p
+            objc.sel_registerName.restype = ctypes.c_void_p
+            objc.objc_msgSend.restype = ctypes.c_void_p
+            objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            app = objc.objc_msgSend(objc.objc_getClass(b"NSApplication"),
+                                    objc.sel_registerName(b"sharedApplication"))
+            objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+            objc.objc_msgSend(app, objc.sel_registerName(b"activateIgnoringOtherApps:"),
+                              True)
+        except Exception:
+            pass                    # worst case is the old behaviour, not a failure
+
+    # Once now, and again once the panel is actually on screen: activating before the
+    # window exists sometimes does not stick, and the retries fire inside the dialog's
+    # own event loop, which is the only place left to run code while it is open.
+    _activate()
+    r.after(200, _activate)
+    r.after(700, _activate)
+
 r.attributes("-topmost", True)      # otherwise it opens behind the browser window
 p = tkinter.filedialog.askdirectory(title="Choose the folder that holds your scans",
                                     initialdir=(sys.argv[1] or None), mustexist=True)
