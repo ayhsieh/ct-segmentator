@@ -380,7 +380,9 @@ async function project(name) {
   st.case_status.forEach(c => c.tasks.forEach(x => doneTasks.add(x)));
 
   const cases = document.getElementById("cases");
-  const tbl = $(`<table><thead><tr><th style="width:26px"></th><th>Case</th>
+  const tbl = $(`<table><thead><tr>
+    <th style="width:26px"><input type="checkbox" id="ckall" checked
+      title="select or clear every case"></th><th>Case</th>
     <th>Converted</th><th>Segmented</th><th>Analyses</th><th></th></tr></thead>
     <tbody></tbody></table>`);
   for (const c of st.case_status) {
@@ -400,6 +402,17 @@ async function project(name) {
     tbl.querySelector("tbody").append(tr);
   }
   cases.append(tbl);
+
+  /* Header checkbox drives the column, and follows it back: clearing one row should
+     leave the header showing "some", not a lie in either direction. */
+  const ckall = document.getElementById("ckall");
+  const cks = [...tbl.querySelectorAll(".ck")];
+  ckall.onchange = () => cks.forEach(c => { c.checked = ckall.checked; });
+  cks.forEach(c => c.addEventListener("change", () => {
+    const n = cks.filter(x => x.checked).length;
+    ckall.checked = n === cks.length;
+    ckall.indeterminate = n > 0 && n < cks.length;
+  }));
 
   const tl = document.getElementById("tl");
   const draw = (filter) => {
