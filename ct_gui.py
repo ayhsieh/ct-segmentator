@@ -536,7 +536,7 @@ def run_step(job, caption, argv):
         # series for, which would otherwise read as a successful run that produced
         # nothing. The UI resolves series before running, so reaching this means the
         # cache changed underneath us - loud is right.
-        if "requiring manual selection" in line:
+        if "requiring manual selection" in line or re.search(r"SKIP \S+: ", line):
             skipped = True
         if job.cancelled:
             break
@@ -545,7 +545,7 @@ def run_step(job, caption, argv):
     proc.wait()
     job.proc = None
     if skipped and proc.returncode == 0:
-        job.emit("!! skipped: no series chosen for this case - use Check series first")
+        job.emit("!! this case was skipped, so nothing was recomputed - see above")
         return 65
     return proc.returncode
 

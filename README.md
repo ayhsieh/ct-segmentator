@@ -14,10 +14,6 @@ are read where they are; nothing is uploaded or copied.
 Download this repository (green **Code** button → **Download ZIP**) and unzip it into
 your Documents folder.
 
-<p align="center">
-  <img src="tutorial_images/download_button.png" />
-</p>
-
 ### Mac
 
 macOS won't run downloaded scripts until you allow them. Right-click the unzipped

@@ -808,6 +808,23 @@ async function fossa(name, cse) {
       &middot; dashed is what the pipeline chose &middot; anterior is up, x is the
       patient's right</div>
     <div id="vols"></div>
+    <fieldset style="border:1px solid var(--line);border-radius:8px;margin:0 0 16px;
+                     padding:10px 14px;background:var(--surface)">
+      <legend class="meta">Extrusion axis</legend>
+      <div class="meta" id="axis" style="margin-bottom:6px"></div>
+      <div class="row">
+        <label class="ui meta">pitch
+          <input type="number" id="pitch" value="0" step="1"
+                 style="width:74px;margin-left:6px"></label>
+        <label class="ui meta">roll
+          <input type="number" id="roll" value="0" step="1"
+                 style="width:74px;margin-left:6px"></label>
+        <span class="meta">degrees</span>
+      </div>
+      <div class="meta" style="margin-top:6px">Pitch tips the walls front to back, roll
+        side to side, in the head’s own frame. Changing either re-measures the floor
+        map, so any boundary you traced is re-read against the new surface.</div>
+    </fieldset>
     <div class="row"><button id="apply">Apply and recompute</button>
       <button class="ghost" id="drop">Drop corrections</button>
       <button class="quiet" id="back">Back</button></div>
@@ -822,6 +839,13 @@ async function fossa(name, cse) {
                        "&case=" + encodeURIComponent(cse)); }
   catch (e) { view.append(err(e)); return; }
   for (const k of ["ant","post"]) if (ST.edits[k]) pts[k] = ST.edits[k];
+  if (ST.edits.up_adjust) {
+    document.getElementById("pitch").value = ST.edits.up_adjust[0];
+    document.getElementById("roll").value = ST.edits.up_adjust[1];
+  }
+  document.getElementById("axis").textContent = ST.stats.up_axis
+    ? `${ST.stats.up_axis} — ${ST.stats.up_tilt_vs_scanner_deg}` +
+      "° off the scanner vertical" : "";
   vols();
 
   img.onload = draw;
@@ -901,16 +925,27 @@ async function fossa(name, cse) {
       out.append($(`<div class="note">Recomputed.</div>`));
     } catch (e) { out.append(err(e)); } finally { undo(); }
   }
+  function axisEdit() {
+    const p = parseFloat(document.getElementById("pitch").value) || 0;
+    const r = parseFloat(document.getElementById("roll").value) || 0;
+    return (p || r) ? [p, r] : null;      /* zero is no adjustment, not an adjustment */
+  }
   document.getElementById("apply").onclick = (ev) => {
     const e = {};
     for (const k of ["ant","post"]) if (pts[k].length >= 2) e[k] = pts[k];
+    const ax = axisEdit();
+    if (ax) e.up_adjust = ax;
     if (!Object.keys(e).length) {
       document.getElementById("fout").append(
-        err({message:"Draw at least two points first."})); return; }
+        err({message:"Draw at least two points, or set a pitch or roll, first."}));
+      return; }
     send(e, ev.currentTarget, "Recomputing…");
   };
   document.getElementById("drop").onclick = (ev) => {
-    pts = {ant:[], post:[]}; draw(); send({}, ev.currentTarget, "Refitting…");
+    pts = {ant:[], post:[]};
+    document.getElementById("pitch").value = 0;
+    document.getElementById("roll").value = 0;
+    draw(); send({}, ev.currentTarget, "Refitting…");
   };
 }
 

@@ -7,8 +7,8 @@ stl_files
 total_segmentor_results
 *zip
 error_logs
-# QC renders and figures, anywhere. tutorial_images/ is already tracked and stays
-# tracked - gitignore does not untrack - so add a new one there with `git add -f`.
+# QC renders and figures, anywhere. The README has no images, so nothing here needs
+# tracking; use `git add -f` if that ever changes.
 *.png
 archive/
 floor_maps/
