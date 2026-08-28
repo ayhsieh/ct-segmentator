@@ -1,36 +1,36 @@
-# Medical Image Segmentation Pipeline — Setup & Usage Guide
+# Medical Image Segmentation — Setup & Usage Guide
 
-This guide walks you through setting up the environment and running the segmentation pipeline on Windows and Mac. No prior programming experience is required.
+This tool takes CT or MRI scans in DICOM format and automatically segments anatomical
+structures using **TotalSegmentator**, a deep learning tool developed at University
+Hospital Basel. It can identify over 100 structures including organs, bones, muscles,
+vessels, and brain regions.
 
----
+You use it through a window in your web browser. It runs entirely on your own computer
+— no scans are uploaded anywhere, and nothing is copied out of the folder they already
+live in.
 
-## What Does This Pipeline Do?
-
-This pipeline takes CT or MRI scans in DICOM format and automatically segments anatomical structures using **TotalSegmentator**, a deep learning tool developed at University Hospital Basel. It can identify over 100 different structures including organs, bones, muscles, vessels, and brain regions.
-
-The script handles the full workflow:
-1. Reads your DICOM folders
-2. Automatically selects the best image series
-3. Converts to the NIfTI format that TotalSegmentator requires
-4. Runs segmentation
-5. Saves results for viewing in 3D Slicer or analysis in Python
+It handles the whole workflow: reading your DICOM folders, picking the right image
+series, converting to NIfTI, running the segmentation, and giving you a spreadsheet of
+volumes.
 
 ---
 
 ## 1. Install Miniconda
 
-Miniconda is a lightweight tool that manages Python and its packages. Think of it as an app store for scientific software.
+Miniconda manages Python and its packages. Think of it as an app store for scientific
+software.
 
-To install Miniconda, follow the instructions for [Windows](https://www.anaconda.com/docs/getting-started/miniconda/install/windows-gui-install) and [Mac](https://www.anaconda.com/docs/getting-started/miniconda/install/mac-gui-install).
+Follow the instructions for [Windows](https://www.anaconda.com/docs/getting-started/miniconda/install/windows-gui-install)
+or [Mac](https://www.anaconda.com/docs/getting-started/miniconda/install/mac-gui-install).
 
-## 2. Create the Conda Environment
+## 2. Create the environment
 
-A conda environment is an isolated workspace that keeps all the required packages together without affecting anything else on your computer. You only need to do this once.
+You only do this once.
 
 ### Open your terminal
 
-- **Windows:** Open **Anaconda Prompt** from the Start Menu
-- **Mac:** Open **Terminal**
+- **Windows:** open **Anaconda Prompt** from the Start Menu
+- **Mac:** open **Terminal**
 
 <p align="center">
   <img src="tutorial_images/windows_menu.png" />
@@ -40,10 +40,9 @@ A conda environment is an isolated workspace that keeps all the required package
   <img src="tutorial_images/terminal_example.png" />
 </p>
 
-### Create and activate the environment
+### Create and activate it
 
 ```bash
-# copy and paste each line into the terminal and hit enter after each line
 conda create -n segmentator python=3.10 -y
 conda activate segmentator
 ```
@@ -52,188 +51,151 @@ conda activate segmentator
   <img src="tutorial_images/example_prompt.png" />
 </p>
 
-You should now see `(segmentator)` instead of `(base)` at the start of your prompt, confirming the environment is active.
+You should see `(segmentator)` at the start of your prompt.
 
-### Install the required packages
+### Install the packages
 
 **Windows (with NVIDIA GPU):**
 ```bash
-pip install pydicom dicom2nifti nibabel numpy totalsegmentator torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd totalsegmentator torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-**Mac (or Windows without NVIDIA GPU):**
+**Mac (or Windows without an NVIDIA GPU):**
 ```bash
-pip install pydicom dicom2nifti nibabel numpy totalsegmentator torch torchvision torchaudio
+pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd totalsegmentator
 ```
 
----
+## 3. Download the tool
 
-## 3. Opening the Terminal for Future Use
-
-Every time you want to run the pipeline, you need to open your terminal and activate the environment.
-
-**Windows:**
-1. Open **Anaconda Prompt** from the Start Menu
-2. Run: `conda activate segmentator`
-
-**Mac:**
-1. Open **Terminal**
-2. Run: `conda activate segmentator`
-
-You should see `(segmentator)` at the start of your prompt before proceeding.
-
----
-
-## 4. Navigating to Your Files
-
-Before running the script, navigate to the folder where your DICOM data is stored using the `cd` command (change directory).
-
-```bash
-# Windows
-cd C:\Users\yourname\Documents\research\data
-
-# Mac
-cd /Users/yourname/Documents/research/data
-```
-
-> **Tip:** You can drag and drop a folder from File Explorer (Windows) or Finder (Mac) into the terminal window to automatically paste its path.
-
----
-
-## 5. Unzipping DICOM Files (if needed)
-
-If your DICOM folders are stored as `.zip` files, unzip them all before running the script. First use the `cd` command to navigate to DICOM folder, the run the command below:
-
-**Windows (Anaconda Prompt):**
-```bash
-for %f in (*.zip) do powershell -command "Expand-Archive -Path '%f' -DestinationPath '%~nf'"
-```
-
-**Mac (Terminal):**
-```bash
-for f in *.zip; do unzip "$f" -d "${f%.zip}"; done
-```
-
-Each zip file will be extracted into a folder of the same name in the current directory.
-
----
-
-## 6. About TotalSegmentator Tasks
-
-TotalSegmentator organises its models into **tasks** — each task targets a specific set of anatomical structures. For a full list of tasks, see [here](https://github.com/wasserth/totalsegmentator?tab=readme-ov-file#subtasks).
-
-Some tasks, such as `brain_structures`, require a license. You can get a license through this [form](https://backend.totalsegmentator.com/license-academic/) (it's free). You should get an email with your license. To set your license (so that the tool knows you have one), run the following command:
-
-```bash
-totalseg_set_license -l {your license here}
-```
-
-Replace `{your license here}` with your license code.
-
----
-
-## 7. Running the Segmentation Script
-
-### Download the scripts
-(if you already know how to use Git, you can ignore)
-
-Download the python file [here](https://github.com/ayhsieh/ct-segmentator/blob/main/segment_structures.py). There should be a download button that looks like this:
-
-
+Download this repository and unzip it somewhere you can find again — your Documents
+folder is fine.
 
 <p align="center">
   <img src="tutorial_images/download_button.png" />
 </p>
-Place `segment_structures.py` in the same folder as where your DICOM folder(s) is:
 
-<p align="center">
-  <img src="tutorial_images/folder_structure.png" />
-</p>
+---
 
+## Starting it
 
-Then run:
+### Windows
 
-### Process a single patient folder
-The `--task` flag is **required** — you must always specify what to segment:
+Double-click **`start.bat`**. A black window opens and your browser follows a moment
+later. Leave the black window open while you work; closing it stops the tool.
 
-```bash
-python segment_structures.py --task brain_structures {DICOM folder name}/{patient folder name}
-```
+### Mac
 
-### Process all patient folders at once
-```bash
-python segment_structures.py --task brain_structures {DICOM folder name}
-```
+Double-click **`start.command`**.
 
-### Task examples
+The first time, macOS blocks it twice. Both are one-offs.
+
+**Make it runnable.** Right-click `start.command`, hold **Option**, and choose
+**Copy "start.command" as Pathname**. Open Terminal, type `chmod +x ` (with a space at
+the end), paste, and press Enter:
 
 ```bash
-# Segment brain structures (ventricles, lobes, cerebellum, etc.)
-python segment_structures.py --task brain_structures path/to/patients
-
-# Segment all 117 major structures
-python segment_structures.py --task total path/to/patients
-
-# Segment lung vessels
-python segment_structures.py --task lung_vessels path/to/patients
-
-# Segment on MRI instead of CT
-python segment_structures.py --task total_mr path/to/patients
+chmod +x /Users/you/Documents/ct-segmentator/start.command
 ```
 
-### What happens next
+**Let it open.** Right-click `start.command` and choose **Open**, then **Open** again
+in the dialog. After this, double-clicking works normally.
 
-The script will scan each folder and either:
+### If nothing opens
 
-- **[AUTO]** — automatically select the best series and proceed
-- **[CACHE]** — use a previously saved selection and proceed
-- **[SKIP]** — skip folders that already have a completed segmentation
-- **[MANUAL]** — ask you to pick a series when it can't decide automatically
+The window will tell you if it cannot find the `segmentator` environment. In that case
+open a terminal, `conda activate segmentator`, `cd` to this folder, and run:
 
-For manual selection, you will see a numbered list like:
-```
-  Folder: PATIENT_001
-  No single candidate auto-detected. Please pick one (or -1 to skip):
-    [1] [series  1] [   2 slices]  SCOUT
-    [2] [series  3] [ 245 slices]  Head  0.75  J40f
-    [3] [series  4] [ 245 slices]  Head  0.75  BONE J70h
-
-  Enter number (1-3), or -1 to skip:
-```
-
-Type the number of the series you want (in this case `2`) and press Enter. Your choice is saved automatically so you won't be asked again for the same patient next time.
-
-### Skip manual prompts on repeat runs
-
-If you've already made all your selections and just want to re-run segmentation on any folders missing output:
 ```bash
-python segment_structures.py path/to/patients --skip-planning
-```
-
-### Force re-run all segmentations
-```bash
-python segment_structures.py path/to/patients --force-redo
+python ct_gui.py --open
 ```
 
 ---
 
-## 8. Output
+## Using it
 
-Results are saved in two folders created automatically in your current directory:
+### Make a project
 
-- `converted_nifti/` — the NIfTI files converted from DICOM, one per patient
-- `total_segmentor_results/` — one subfolder per patient, containing:
-  - One `.nii.gz` file per segmented structure (e.g. `ventricle.nii.gz`, `frontal_lobe.nii.gz`)
-  - `statistics.json` — volumes in mm³ for each structure
+A project points at a folder of scans. Click **New project**, browse to the folder that
+holds one subfolder per patient, and click **Use this folder**.
 
-These files can be loaded directly into **3D Slicer** for visualisation.
+The tool finds the patient folders, shows them, and creates the project. Your DICOMs are
+not copied or moved — everything it generates goes into a `projects/` folder inside the
+tool's own directory.
 
-To create a csv file of everything, download `combine.py` [here](https://github.com/ayhsieh/ct-segmentator/blob/main/combine.py) (or with `git clone` if familiar) and run:
+> If your scans are still in `.zip` files, unzip them first. The tool will warn you if it
+> sees any, because the pipeline deletes zip files after extracting them.
+
+### Choose what to segment
+
+Search the list of 25 structures, tick what you want, and press **Start segmenting**.
+Some tasks are marked **licence** — those need a free academic licence number, which you
+can request [here](https://backend.totalsegmentator.com/license-academic/). Paste it into
+the box that appears.
+
+Two extra analyses are listed below the structures: **cranial fossa volumes** and
+**brain and intracranial volume**. Both need `brain_structures` to have been run first.
+
+Anything already done is marked and skipped. Tick **re-run even if done** to force it.
+
+### Watch it run
+
+You get a live log, a progress bar, and a timer. Segmentation takes roughly a minute per
+patient per structure set on a GPU, considerably longer on a laptop without one.
+
+Only one job runs at a time. A second one says **Queued** until the first finishes. You
+can close the browser and come back — the work carries on.
+
+### Check the series (optional)
+
+A scan usually contains several reconstructions of the same acquisition — a soft-tissue
+one, a bone one, sometimes a coronal reformat. The tool scores them and picks the best,
+and this is right almost always.
+
+**Check series first** shows you what it picked and why. Where two are close it asks you
+to choose. If you are unsure which is which, open the folder in 3D Slicer and look — you
+want a soft-tissue axial reconstruction of the whole head.
+
+### Get your results
+
+Under **Results**, press **Build** then **Download** for:
+
+- **All structure volumes** — every structure from every task, one row per patient
+- **Brain and ICV** — parenchyma and intracranial volume
+- **Cranial fossa volumes** — anterior, middle and posterior compartments
+
+Segmentations are also saved as `.seg.nrrd` files you can open directly in **3D Slicer**,
+under `projects/<your project>/total_segmentor_results_<your project>/`.
+
+### Adding more later
+
+Open the project again and tick another structure. It only runs the new one — nothing is
+redone and nothing is re-imported.
+
+### Correcting fossa boundaries
+
+If you ran the cranial fossa analysis, each patient row gets a **review fossa** link. It
+shows the skull floor from above, with the boundaries the tool chose. If one is wrong,
+click along where it should be and press **Apply and recompute**. Your correction is kept
+and survives future runs; **Drop corrections** puts it back.
+
+---
+
+## Using it from the command line
+
+The browser tool is a front end for four scripts, which still work on their own:
 
 ```bash
-python produce_table.py
+python segment_structures.py --group STUDY --task brain_structures
+python segment_fossae.py --group STUDY
+python brain_icv.py --group STUDY
+python produce_table.py --group STUDY
 ```
 
-<p align="center">
-  <img src="tutorial_images/another_folder.png" />
-</p>
+By default these look for study folders under `ct_scans/`. Set `CT_DATA_ROOT` to keep
+your scans somewhere else.
+
+To check your installation:
+
+```bash
+python ct_gui.py --selftest
+```

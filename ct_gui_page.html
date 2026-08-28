@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CT Segmentation</title>
+<style>
+:root{
+  --ink:#191919; --mid:#6b6b6b; --faint:#a1a1a1; --line:#e6e6e6; --bg:#fff;
+  --accent:#1a8917; --accentdim:#e8f3e8; --warn:#c0392b; --warnbg:#fdeeec;
+  --amber:#b7791f; --amberbg:#fdf6e3; --panel:#fafafa;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --serif:Charter,"Iowan Old Style","Source Serif Pro",Georgia,Cambria,"Times New Roman",serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--serif);
+  font-size:19px;line-height:1.58;-webkit-font-smoothing:antialiased}
+h1,h2,h3,button,label,th,.ui{font-family:var(--sans)}
+h1{font-size:34px;line-height:1.2;letter-spacing:-.02em;margin:0 0 6px;font-weight:700}
+h2{font-size:23px;letter-spacing:-.01em;margin:34px 0 10px;font-weight:600}
+h3{font-size:16px;margin:0 0 4px;font-weight:600}
+p{margin:0 0 14px;color:var(--ink)}
+.sub{color:var(--mid);font-size:17px;margin:0 0 26px}
+a{color:inherit}
+header{border-bottom:1px solid var(--line);padding:14px 0;margin-bottom:34px}
+header .in{max-width:840px;margin:0 auto;padding:0 22px;display:flex;
+  align-items:center;gap:14px}
+.brand{font-family:var(--sans);font-weight:700;letter-spacing:-.02em;font-size:19px}
+.crumb{color:var(--faint);font-family:var(--sans);font-size:14px}
+main{max-width:840px;margin:0 auto;padding:0 22px 90px}
+button{font-size:14px;font-weight:500;padding:8px 16px;border-radius:99px;
+  border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;
+  transition:opacity .15s}
+button:hover:not(:disabled){opacity:.82}
+button.ghost{background:transparent;color:var(--ink);border-color:#ccc}
+button.quiet{background:transparent;color:var(--mid);border-color:transparent;
+  padding:6px 8px;text-decoration:underline}
+button:disabled{opacity:.45;cursor:default}
+button.busy{background:var(--mid);border-color:var(--mid)}
+input[type=text],input[type=search]{font-family:var(--sans);font-size:15px;
+  padding:9px 12px;border:1px solid #d5d5d5;border-radius:6px;width:100%}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 12px}
+.card.click{cursor:pointer}
+.card.click:hover{border-color:#c9c9c9;background:var(--panel)}
+.meta{color:var(--mid);font-size:14px;font-family:var(--sans)}
+.pill{display:inline-block;font-family:var(--sans);font-size:12px;padding:2px 9px;
+  border-radius:99px;background:#f0f0f0;color:var(--mid);margin:0 5px 5px 0}
+.pill.on{background:var(--accentdim);color:var(--accent)}
+.pill.warn{background:var(--warnbg);color:var(--warn)}
+.pill.amber{background:var(--amberbg);color:var(--amber)}
+.empty{border:1px dashed #ddd;border-radius:10px;padding:40px 22px;text-align:center;
+  color:var(--mid)}
+table{width:100%;border-collapse:collapse;font-family:var(--sans);font-size:14px}
+th{text-align:left;font-weight:600;color:var(--mid);border-bottom:1px solid var(--line);
+  padding:7px 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+td{padding:8px;border-bottom:1px solid #f2f2f2;vertical-align:top}
+tr.sel td{background:var(--accentdim)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+#log{background:#fbfbfb;border:1px solid var(--line);border-radius:8px;padding:12px 14px;
+  height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+#log div{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12.5px;line-height:1.5;color:#333}
+#log div.cmd{color:var(--faint)}
+#log div.bad{color:var(--warn)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #fff6;
+  border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;
+  vertical-align:-2px;margin-right:7px}
+.spin.dark{border:2px solid #0002;border-top-color:var(--mid)}
+@keyframes sp{to{transform:rotate(360deg)}}
+.bar{height:4px;background:#eee;border-radius:99px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+.tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.tasklist label{display:flex;gap:11px;padding:10px 14px;border-bottom:1px solid #f4f4f4;
+  cursor:pointer;align-items:flex-start}
+.tasklist label:hover{background:var(--panel)}
+.tasklist input{margin-top:4px}
+.tname{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13.5px}
+.tblurb{color:var(--mid);font-size:13px;font-family:var(--sans)}
+.note{background:var(--panel);border-left:3px solid var(--line);padding:11px 15px;
+  color:var(--mid);font-size:15px;margin:0 0 16px}
+.note.warn{background:var(--warnbg);border-left-color:var(--warn);color:#8a2b21}
+.note.amber{background:var(--amberbg);border-left-color:var(--amber);color:#7a5410}
+canvas{border:1px solid var(--line);border-radius:6px;cursor:crosshair;
+  image-rendering:pixelated;max-width:100%}
+.hide{display:none}
+.reasons{color:var(--faint);font-size:12px;font-family:var(--sans)}
+.right{margin-left:auto}
+.stack>*+*{margin-top:9px}
+</style>
+</head>
+<body>
+<header><div class="in">
+  <span class="brand">CT Segmentation</span>
+  <span class="crumb" id="crumb"></span>
+  <span class="right"><button class="quiet" id="navHome">All projects</button></span>
+</div></header>
+<main>
+  <div id="view"></div>
+</main>
+
+<script>
+const TOKEN = "__TOKEN__";
+const $ = (h) => { const t = document.createElement("template");
+                   t.innerHTML = h.trim(); return t.content.firstElementChild; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const view = document.getElementById("view");
+const crumb = document.getElementById("crumb");
+let POLL = null;
+
+async function api(path, body) {
+  const opt = body
+    ? {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN},
+       body: JSON.stringify(Object.assign({token:TOKEN}, body))}
+    : {headers:{"X-Token":TOKEN}};
+  const sep = path.includes("?") ? "&" : "?";
+  const r = await fetch(path + sep + "token=" + encodeURIComponent(TOKEN), opt);
+  const j = await r.json().catch(() => ({error:"the server sent something unreadable"}));
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+
+/* Every click must change something immediately, before the server answers - a button
+   that looks identical for two seconds reads as a dead button. */
+function pending(btn, label) {
+  if (!btn) return () => {};
+  const html = btn.innerHTML, dis = btn.disabled;
+  btn.disabled = true; btn.classList.add("busy");
+  btn.innerHTML = '<span class="spin"></span>' + esc(label || "Working…");
+  return () => { btn.innerHTML = html; btn.disabled = dis;
+                 btn.classList.remove("busy"); };
+}
+function stopPoll() { if (POLL) { clearInterval(POLL); POLL = null; } }
+function fmtTime(s) {
+  s = Math.round(s);
+  return s < 60 ? s + "s" : Math.floor(s/60) + "m " + String(s%60).padStart(2,"0") + "s";
+}
+
+/* ---------------------------------------------------------------- home */
+async function home() {
+  stopPoll(); crumb.textContent = "";
+  view.innerHTML = "";
+  view.append($(`<div>
+    <h1>Your projects</h1>
+    <p class="sub">A project points at a folder of scans. Nothing is copied and nothing
+    leaves this computer.</p>
+    <div class="row" style="margin-bottom:22px">
+      <button id="new">New project</button>
+    </div>
+    <div id="list"></div></div>`));
+  document.getElementById("new").onclick = () => newProject();
+  const list = document.getElementById("list");
+  list.append($(`<div class="meta"><span class="spin dark"></span>loading…</div>`));
+  try {
+    const {projects} = await api("/api/projects");
+    list.innerHTML = "";
+    if (!projects.length) {
+      list.append($(`<div class="empty">No projects yet.<br>
+        Choose <b>New project</b> and point it at a folder of DICOM scans.</div>`));
+      return;
+    }
+    for (const p of projects) {
+      const c = $(`<div class="card click">
+        <h3>${esc(p.name)}</h3>
+        <div class="meta">${p.cases} case${p.cases===1?"":"s"} &middot;
+          ${esc(p.source)} &middot; created ${esc(p.created||"")}</div></div>`);
+      c.onclick = () => project(p.name);
+      list.append(c);
+    }
+  } catch (e) { list.innerHTML = ""; list.append(err(e)); }
+}
+function err(e) {
+  return $(`<div class="note warn">${esc(e.message || e)}</div>`);
+}
+
+/* ------------------------------------------------------- new project */
+async function newProject() {
+  stopPoll(); crumb.textContent = "New project";
+  view.innerHTML = "";
+  view.append($(`<div>
+    <h1>Point at your scans</h1>
+    <p class="sub">Pick the folder that holds one subfolder per patient. Folders with
+    DICOM files in them are marked.</p>
+    <div id="crumbs" class="row" style="margin-bottom:10px"></div>
+    <div id="browser" class="card" style="max-height:330px;overflow:auto"></div>
+    <div id="found"></div></div>`));
+  let cur = null;
+  const browser = document.getElementById("browser");
+  const crumbs = document.getElementById("crumbs");
+  const found = document.getElementById("found");
+
+  async function go(path) {
+    browser.innerHTML = '<div class="meta"><span class="spin dark"></span>reading…</div>';
+    found.innerHTML = "";
+    let b;
+    try { b = await api("/api/browse?path=" + encodeURIComponent(path || "")); }
+    catch (e) { browser.innerHTML = ""; browser.append(err(e)); return; }
+    cur = b.path;
+    crumbs.innerHTML = "";
+    for (const r of b.roots) {
+      const btn = $(`<button class="ghost">${esc(r.name)}</button>`);
+      btn.onclick = () => go(r.path); crumbs.append(btn);
+    }
+    if (b.parent) {
+      const up = $(`<button class="ghost">&uarr; up</button>`);
+      up.onclick = () => go(b.parent); crumbs.append(up);
+    }
+    crumbs.append($(`<span class="meta mono">${esc(b.path)}</span>`));
+    browser.innerHTML = "";
+    if (!b.dirs.length) browser.append($(`<div class="meta">no subfolders here</div>`));
+    for (const d of b.dirs) {
+      const row = $(`<div class="row" style="padding:5px 0">
+        <button class="quiet" style="text-decoration:none">${esc(d.name)}</button>
+        ${d.dicom ? '<span class="pill on">DICOM</span>' : ''}</div>`);
+      row.querySelector("button").onclick = () => go(d.path);
+      browser.append(row);
+    }
+    const use = $(`<button style="margin-top:12px">Use this folder</button>`);
+    use.onclick = () => detect(use);
+    browser.append(use);
+  }
+
+  async function detect(btn) {
+    const done = pending(btn, "Looking for cases…");
+    found.innerHTML = "";
+    try {
+      const d = await api("/api/detect?path=" + encodeURIComponent(cur));
+      done();
+      if (d.error) { found.append(err({message:d.error})); return; }
+      if (!d.cases.length) {
+        found.append($(`<div class="note warn">No DICOM files found under
+          ${esc(cur)}. Open a subfolder and try again.</div>`)); return;
+      }
+      const box = $(`<div><h2>${d.cases.length} case${d.cases.length===1?"":"s"} found</h2>
+        <div id="zipwarn"></div>
+        <div class="card" id="cl" style="max-height:290px;overflow:auto"></div>
+        <div class="row" style="margin-top:14px">
+          <input type="text" id="pname" placeholder="Project name"
+                 style="max-width:280px" value="${esc(cur.split(/[\\\\/]/).pop())}">
+          <button id="create">Create project</button></div>
+        <div id="cerr"></div></div>`);
+      found.append(box);
+      if (d.zips && d.zips.length) {
+        document.getElementById("zipwarn").append($(`<div class="note amber">
+          This folder still has ${d.zips.length} zip file(s) in it. The pipeline
+          <b>unzips and then deletes</b> zip files it finds. Unzip them yourself first
+          if you want to keep the originals.</div>`));
+      }
+      const cl = document.getElementById("cl");
+      for (const c of d.cases) {
+        const r = $(`<label class="row" style="padding:4px 0">
+          <input type="checkbox" checked data-case='${esc(JSON.stringify(c))}'>
+          <span>${esc(c.case)}</span>
+          ${c.note ? `<span class="pill amber">${esc(c.note)}</span>` : ""}
+          </label>`);
+        cl.append(r);
+      }
+      document.getElementById("create").onclick = async (ev) => {
+        const b = ev.currentTarget, undo = pending(b, "Creating…");
+        const cases = [...cl.querySelectorAll("input:checked")]
+          .map(i => JSON.parse(i.dataset.case));
+        const cerr = document.getElementById("cerr"); cerr.innerHTML = "";
+        try {
+          const res = await api("/api/project/create", {
+            name: document.getElementById("pname").value, source: cur, cases});
+          if (res.failed && res.failed.length)
+            alert("Some cases could not be linked:\n" + res.failed.join("\n"));
+          project(res.name);
+        } catch (e) { undo(); cerr.append(err(e)); }
+      };
+    } catch (e) { done(); found.append(err(e)); }
+  }
+  go("");
+}
+
+/* ---------------------------------------------------------- project */
+let TASKS = null;
+async function project(name) {
+  stopPoll(); crumb.textContent = name;
+  view.innerHTML = "";
+  view.append($(`<div class="meta"><span class="spin dark"></span>loading…</div>`));
+  let st, t;
+  try {
+    st = await api("/api/project?name=" + encodeURIComponent(name));
+    t = TASKS || (TASKS = await api("/api/tasks"));
+  } catch (e) { view.innerHTML = ""; view.append(err(e)); return; }
+
+  view.innerHTML = "";
+  const offline = st.case_status.filter(c => !c.online);
+  view.append($(`<div>
+    <h1>${esc(name)}</h1>
+    <p class="sub">${st.case_status.length} case(s) &middot;
+      <span class="mono">${esc(st.source || "")}</span></p>
+    ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
+      folder that is not there right now - is the drive connected?</div>` : ""}
+    <div id="cases"></div>
+    <h2>Segment</h2>
+    <p class="sub" style="margin-bottom:12px">Tick what you want. Anything already done
+      is marked, and is skipped unless you ask for a re-run.</p>
+    <div class="row" style="margin-bottom:10px">
+      <input type="search" id="q" placeholder="Search 25 structures…" style="max-width:320px">
+      <label class="ui meta"><input type="checkbox" id="force"> re-run even if done</label>
+    </div>
+    <div class="tasklist" id="tl"></div>
+    <div id="lic"></div>
+    <h2>Analyses</h2>
+    <div class="tasklist" id="al"></div>
+    <div class="row" style="margin-top:18px">
+      <button id="run">Start segmenting</button>
+      <button class="ghost" id="scan">Check series first</button>
+    </div>
+    <div id="runerr"></div>
+    <h2>Results</h2>
+    <div id="results"></div>
+    </div>`));
+
+  const doneTasks = new Set();
+  st.case_status.forEach(c => c.tasks.forEach(x => doneTasks.add(x)));
+
+  const cases = document.getElementById("cases");
+  const tbl = $(`<table><thead><tr><th style="width:26px"></th><th>Case</th>
+    <th>Converted</th><th>Segmented</th><th>Analyses</th><th></th></tr></thead>
+    <tbody></tbody></table>`);
+  for (const c of st.case_status) {
+    const tr = $(`<tr id="row-${esc(c.case)}">
+      <td><input type="checkbox" class="ck" checked value="${esc(c.case)}"></td>
+      <td><b>${esc(c.case)}</b><div class="meta status"></div></td>
+      <td>${c.converted ? '<span class="pill on">yes</span>' : '<span class="pill">no</span>'}</td>
+      <td>${c.tasks.length ? c.tasks.map(x=>`<span class="pill on">${esc(x)}</span>`).join("")
+                           : '<span class="pill">none</span>'}</td>
+      <td>${c.fossae ? '<span class="pill on">fossae</span>' : ''}
+          ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
+          ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
+      <td>${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}</td>
+    </tr>`);
+    const rev = tr.querySelector(".rev");
+    if (rev) rev.onclick = () => fossa(name, c.case);
+    tbl.querySelector("tbody").append(tr);
+  }
+  cases.append(tbl);
+
+  const tl = document.getElementById("tl");
+  const draw = (filter) => {
+    tl.innerHTML = "";
+    const f = (filter || "").toLowerCase();
+    for (const task of t.tasks) {
+      if (f && !task.name.toLowerCase().includes(f) &&
+          !(task.blurb || "").toLowerCase().includes(f)) continue;
+      tl.append($(`<label>
+        <input type="checkbox" class="task" value="${esc(task.name)}">
+        <span><span class="tname">${esc(task.name)}</span>
+          ${task.licensed ? '<span class="pill amber">licence</span>' : ''}
+          ${doneTasks.has(task.name) ? '<span class="pill on">done</span>' : ''}
+          <div class="tblurb">${esc(task.blurb || "")}</div></span></label>`));
+    }
+    tl.querySelectorAll(".task").forEach(b => b.onchange = licCheck);
+  };
+  draw("");
+  document.getElementById("q").oninput = (e) => draw(e.target.value);
+
+  const al = document.getElementById("al");
+  for (const [k, a] of Object.entries(t.analyses)) {
+    al.append($(`<label><input type="checkbox" class="anal" value="${esc(k)}">
+      <span><span class="tname">${esc(a.label)}</span>
+      <div class="tblurb">${esc(a.blurb)} &middot; needs ${esc(a.needs.join(", "))}</div>
+      </span></label>`));
+  }
+
+  function licCheck() {
+    const need = [...document.querySelectorAll(".task:checked")]
+      .map(i => i.value).filter(v => t.tasks.find(x => x.name === v && x.licensed));
+    const box = document.getElementById("lic");
+    box.innerHTML = "";
+    if (need.length) box.append($(`<div class="note amber">
+      <b>${esc(need.join(", "))}</b> need a free non-commercial licence number.
+      <input type="text" id="licno" placeholder="licence number"
+             style="max-width:260px;margin-top:8px"></div>`));
+  }
+
+  document.getElementById("scan").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Queued…");
+    try {
+      const cs = [...document.querySelectorAll(".ck:checked")].map(i => i.value);
+      const {job} = await api("/api/scan", {project:name, cases:cs});
+      series(name, job);
+    } catch (e) { undo(); document.getElementById("runerr").append(err(e)); }
+  };
+
+  document.getElementById("run").onclick = async (ev) => {
+    const btn = ev.currentTarget, undo = pending(btn, "Queued…");
+    const box = document.getElementById("runerr"); box.innerHTML = "";
+    const cs = [...document.querySelectorAll(".ck:checked")].map(i => i.value);
+    const tasks = [...document.querySelectorAll(".task:checked")].map(i => i.value);
+    const anal = [...document.querySelectorAll(".anal:checked")].map(i => i.value);
+    if (!cs.length) { undo(); box.append(err({message:"Tick at least one case."})); return; }
+    if (!tasks.length && !anal.length) {
+      undo(); box.append(err({message:"Tick at least one structure or analysis."})); return; }
+    try {
+      const r = await api("/api/run", {project:name, cases:cs, tasks, analyses:anal,
+        force: document.getElementById("force").checked,
+        license: (document.getElementById("licno")||{}).value || ""});
+      running(name, r.jobs);
+    } catch (e) { undo(); box.append(err(e)); }
+  };
+
+  const res = document.getElementById("results");
+  const kinds = [["produce_table","All structure volumes",`${name}_table.csv`],
+                 ["brain_icv","Brain and ICV","brain_icv_volumes.csv"],
+                 ["fossae","Cranial fossa volumes","fossa_volumes.csv"]];
+  for (const [kind, label, file] of kinds) {
+    const c = $(`<div class="card"><div class="row">
+      <div><h3>${esc(label)}</h3><div class="meta mono">${esc(file)}</div></div>
+      <span class="right"></span>
+      <button class="ghost bld">Build</button>
+      <button class="ghost dl">Download</button></div>
+      <div class="out"></div></div>`);
+    c.querySelector(".bld").onclick = async (ev) => {
+      const undo = pending(ev.currentTarget, "Building…");
+      const out = c.querySelector(".out"); out.innerHTML = "";
+      try {
+        const {job} = await api("/api/table", {project:name, kind});
+        await follow(job, (s) => {
+          out.innerHTML = "";
+          out.append($(`<div class="meta">${esc(s.state)}${
+            s.state==="running" ? " · " + fmtTime(s.elapsed) : ""}</div>`));
+          if (s.state === "failed")
+            out.append($(`<div class="note warn">${esc(
+              (s.lines||[]).slice(-3).join("\n") || s.error)}</div>`));
+        });
+      } catch (e) { out.append(err(e)); } finally { undo(); }
+    };
+    c.querySelector(".dl").onclick = () => {
+      window.location = "/api/download?name=" + encodeURIComponent(name) +
+        "&file=" + encodeURIComponent(file) + "&token=" + encodeURIComponent(TOKEN);
+    };
+    res.append(c);
+  }
+}
+
+/* ------------------------------------------------------- job following */
+async function follow(id, onTick) {
+  let since = 0;
+  return new Promise((resolve) => {
+    stopPoll();
+    POLL = setInterval(async () => {
+      let s;
+      try { s = await api("/api/job?id=" + id + "&since=" + since); }
+      catch { return; }
+      since = s.next;
+      onTick(s);
+      if (["done","failed","cancelled"].includes(s.state)) { stopPoll(); resolve(s); }
+    }, 800);
+  });
+}
+
+function running(name, jobs) {
+  stopPoll(); crumb.textContent = name + " · running";
+  view.innerHTML = "";
+  view.append($(`<div>
+    <h1>Working</h1>
+    <p class="sub" id="head">Starting…</p>
+    <div class="bar"><i id="bar" style="width:0%"></i></div>
+    <div class="row" style="margin-bottom:14px">
+      <button class="ghost" id="cancel">Stop</button>
+      <button class="quiet" id="back">Back to project</button>
+      <span class="right meta" id="clock"></span></div>
+    <div id="log"></div></div>`));
+  const log = document.getElementById("log");
+  document.getElementById("back").onclick = () => project(name);
+  let cur = 0;
+  document.getElementById("cancel").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Stopping…");
+    try { await api("/api/job/cancel", {id: jobs[cur]}); } catch {}
+    undo();
+  };
+  /* a ticking clock is what separates "working" from "frozen" when TotalSegmentator
+     goes quiet for minutes at a time */
+  let t0 = Date.now();
+  setInterval(() => {
+    const el = document.getElementById("clock");
+    if (el && el.dataset.live === "1")
+      el.textContent = fmtTime((Date.now() - t0) / 1000);
+  }, 1000);
+
+  (async () => {
+    for (let i = 0; i < jobs.length; i++) {
+      cur = i; t0 = Date.now();
+      const clock = document.getElementById("clock");
+      if (clock) clock.dataset.live = "1";
+      await follow(jobs[i], (s) => {
+        const q = s.state === "queued";
+        document.getElementById("head").innerHTML = q
+          ? `<span class="spin dark"></span>Queued &mdash; waiting for another job to finish`
+          : `${esc(s.label)} &mdash; step ${s.step} of ${s.steps}` +
+            (s.step_label ? ` &middot; <b>${esc(s.step_label)}</b>` : "");
+        document.getElementById("bar").style.width =
+          (s.steps ? 100 * s.step / s.steps : 0) + "%";
+        for (const line of s.lines || []) {
+          const cls = line.startsWith("$ ") ? "cmd"
+                    : /error|fail|traceback|!!/i.test(line) ? "bad" : "";
+          log.append($(`<div class="${cls}">${esc(line)}</div>`));
+        }
+        if (s.lines && s.lines.length) log.scrollTop = log.scrollHeight;
+      });
+      const clock2 = document.getElementById("clock");
+      if (clock2) clock2.dataset.live = "0";
+    }
+    document.getElementById("head").textContent = "Finished.";
+    document.getElementById("bar").style.width = "100%";
+    const b = $(`<button style="margin-top:14px">See results</button>`);
+    b.onclick = () => project(name);
+    document.getElementById("log").after(b);
+  })();
+}
+
+/* ------------------------------------------------------ series screen */
+async function series(name, job) {
+  stopPoll(); crumb.textContent = name + " · series";
+  view.innerHTML = "";
+  view.append($(`<div>
+    <h1>Which series?</h1>
+    <p class="sub">A scan usually holds several reconstructions. The pipeline scores
+    them and picks one; where two are close it needs you to decide.</p>
+    <div class="note">Not sure? Open the folder in 3D Slicer and look at the series -
+    you want a soft-tissue axial reconstruction of the whole head, not a bone kernel or
+    a coronal reformat.</div>
+    <div id="cs"></div>
+    <div class="row" style="margin-top:16px">
+      <button id="doneb">Back to project</button></div></div>`));
+  document.getElementById("doneb").onclick = () => project(name);
+  const cs = document.getElementById("cs");
+  cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
+
+  await follow(job, (s) => {
+    if (!s.results) return;
+    cs.innerHTML = "";
+    for (const [cse, r] of Object.entries(s.results)) render(cse, r);
+    if (s.state === "running")
+      cs.append($(`<div class="meta"><span class="spin dark"></span>still reading…</div>`));
+  });
+
+  function render(cse, r) {
+    if (r.error) {
+      cs.append($(`<div class="card"><h3>${esc(cse)}</h3>
+        <div class="note warn">${esc(r.error)}</div></div>`)); return;
+    }
+    const badge = {cached:'<span class="pill on">already chosen</span>',
+                   auto:'<span class="pill on">picked automatically</span>',
+                   manual:'<span class="pill amber">needs you to choose</span>',
+                   none:'<span class="pill warn">no series found</span>'}[r.decision];
+    const card = $(`<div class="card"><div class="row">
+      <h3>${esc(cse)}</h3>${badge}</div>
+      <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
+        <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
+      <tbody></tbody></table></div>`);
+    const tb = card.querySelector("tbody");
+    for (const s of r.series) {
+      const chosen = r.chosen && String(r.chosen.snum) === String(s.snum);
+      const tr = $(`<tr class="${chosen ? "sel" : ""}">
+        <td><button class="quiet pick">use</button></td>
+        <td>${esc(s.snum)}</td><td>${s.slices}</td>
+        <td>${s.thickness == null ? "?" : esc(s.thickness) + "mm"}</td>
+        <td class="mono">${esc(s.kernel || "?")}</td>
+        <td>${s.axial ? "axial" : "other"}</td>
+        <td><b>${s.score}</b></td>
+        <td>${esc(s.desc || "(none)")}
+          <div class="reasons">${esc((s.reasons||[]).join(", "))}</div></td></tr>`);
+      tr.querySelector(".pick").onclick = async (ev) => {
+        const undo = pending(ev.currentTarget, "Saving…");
+        try {
+          const res = await api("/api/series/pick", {project:name, case:cse,
+            series_dir:s.series_dir, snum:s.snum, desc:s.desc});
+          tb.querySelectorAll("tr").forEach(x => x.classList.remove("sel"));
+          tr.classList.add("sel");
+          card.querySelector(".pill").outerHTML =
+            '<span class="pill on">chosen by you</span>';
+          if (res.cleared_nifti)
+            card.append($(`<div class="note amber">Removed the old converted image so
+              this new choice takes effect.</div>`));
+        } catch (e) { card.append(err(e)); } finally { undo(); }
+      };
+      tb.append(tr);
+    }
+    cs.append(card);
+  }
+}
+
+/* -------------------------------------------------------- fossa review */
+async function fossa(name, cse) {
+  stopPoll(); crumb.textContent = name + " · " + cse;
+  view.innerHTML = "";
+  view.append($(`<div>
+    <h1>Fossa boundaries</h1>
+    <p class="sub">${esc(cse)} &mdash; the skull floor seen from above. Light is a high
+    shelf, dark is a deep basin. Click left to right to draw a boundary where you think
+    it should be.</p>
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost" id="mAnt">Trace anterior</button>
+      <button class="ghost" id="mPost">Trace posterior</button>
+      <button class="quiet" id="undo">Undo point</button>
+      <button class="quiet" id="clear">Clear</button></div>
+    <canvas id="cv" width="560" height="560"></canvas>
+    <div class="meta" style="margin:8px 0 16px">magenta = anterior, cyan = posterior
+      &middot; dashed is what the pipeline chose &middot; anterior is up, x is the
+      patient's right</div>
+    <div id="vols"></div>
+    <div class="row"><button id="apply">Apply and recompute</button>
+      <button class="ghost" id="drop">Drop corrections</button>
+      <button class="quiet" id="back">Back</button></div>
+    <div id="fout"></div></div>`));
+  document.getElementById("back").onclick = () => project(name);
+
+  const cv = document.getElementById("cv"), cx = cv.getContext("2d");
+  let ST = null, mode = "post", pts = {ant:[], post:[]};
+  const img = new Image();
+
+  try { ST = await api("/api/fossa/case?name=" + encodeURIComponent(name) +
+                       "&case=" + encodeURIComponent(cse)); }
+  catch (e) { view.append(err(e)); return; }
+  for (const k of ["ant","post"]) if (ST.edits[k]) pts[k] = ST.edits[k];
+  vols();
+
+  img.onload = draw;
+  img.src = "/api/fossa/floor.png?name=" + encodeURIComponent(name) +
+            "&case=" + encodeURIComponent(cse) + "&token=" + encodeURIComponent(TOKEN) +
+            "&t=" + Date.now();
+
+  const mm2x = (m) => (m - ST.lanes[0]) / (ST.lanes.at(-1) - ST.lanes[0]) * cv.width;
+  const mm2y = (m) => (ST.fmax - m) / (ST.fmax - ST.f0) * cv.height;
+  const x2mm = (x) => ST.lanes[0] + x / cv.width * (ST.lanes.at(-1) - ST.lanes[0]);
+  const y2mm = (y) => ST.fmax - y / cv.height * (ST.fmax - ST.f0);
+
+  function poly(v, colour, dash) {
+    cx.beginPath(); cx.strokeStyle = colour; cx.lineWidth = 2;
+    cx.setLineDash(dash ? [6,4] : []);
+    ST.lanes.forEach((l,i) => { const x = mm2x(l), y = mm2y(v[i]);
+      i ? cx.lineTo(x,y) : cx.moveTo(x,y); });
+    cx.stroke(); cx.setLineDash([]);
+  }
+  function draw() {
+    cx.clearRect(0,0,cv.width,cv.height);
+    cx.drawImage(img, 0, 0, cv.width, cv.height);
+    poly(ST.ant, "magenta", true); poly(ST.post, "cyan", true);
+    for (const [k,colour] of [["ant","magenta"],["post","cyan"]]) {
+      if (!pts[k].length) continue;
+      cx.beginPath(); cx.strokeStyle = colour; cx.lineWidth = 3;
+      pts[k].forEach((p,i) => { const x = mm2x(p[0]), y = mm2y(p[1]);
+        i ? cx.lineTo(x,y) : cx.moveTo(x,y); });
+      cx.stroke(); cx.fillStyle = colour;
+      pts[k].forEach(p => { cx.beginPath();
+        cx.arc(mm2x(p[0]), mm2y(p[1]), 4, 0, 7); cx.fill(); });
+    }
+  }
+  cv.onclick = (e) => {
+    const r = cv.getBoundingClientRect();
+    const sx = cv.width / r.width, sy = cv.height / r.height;
+    pts[mode].push([x2mm((e.clientX-r.left)*sx), y2mm((e.clientY-r.top)*sy)]);
+    pts[mode].sort((a,b) => a[0]-b[0]); draw();
+  };
+  const setMode = (m) => { mode = m;
+    document.getElementById("mAnt").style.fontWeight = m==="ant" ? "700" : "";
+    document.getElementById("mPost").style.fontWeight = m==="post" ? "700" : ""; };
+  document.getElementById("mAnt").onclick = () => setMode("ant");
+  document.getElementById("mPost").onclick = () => setMode("post");
+  document.getElementById("undo").onclick = () => { pts[mode].pop(); draw(); };
+  document.getElementById("clear").onclick = () => { pts[mode] = []; draw(); };
+  setMode("post");
+
+  function vols() {
+    const c = (ST.stats || {}).compartments || {};
+    const box = document.getElementById("vols"); box.innerHTML = "";
+    if (!Object.keys(c).length) return;
+    box.append($(`<div class="card"><div class="row">` +
+      Object.entries(c).map(([k,v]) =>
+        `<div style="margin-right:26px"><h3>${esc(k.replace("_"," "))}</h3>
+         <div class="meta">${v.ml} mL &middot; ${v.percent_of_icv}% of ICV</div></div>`
+      ).join("") + `</div></div>`));
+  }
+
+  async function send(edits, btn, label) {
+    const undo = pending(btn, label);
+    const out = document.getElementById("fout"); out.innerHTML = "";
+    try {
+      const {job} = await api("/api/fossa/apply", {project:name, case:cse, edits});
+      await follow(job, (s) => {
+        out.innerHTML = "";
+        out.append($(`<div class="meta">${esc(s.state)}${
+          s.state === "running" ? " · " + fmtTime(s.elapsed) : ""} ${
+          esc(s.step_label||"")}</div>`));
+      });
+      ST = await api("/api/fossa/case?name=" + encodeURIComponent(name) +
+                     "&case=" + encodeURIComponent(cse));
+      vols();
+      img.src = "/api/fossa/floor.png?name=" + encodeURIComponent(name) +
+                "&case=" + encodeURIComponent(cse) +
+                "&token=" + encodeURIComponent(TOKEN) + "&t=" + Date.now();
+      out.append($(`<div class="note">Recomputed.</div>`));
+    } catch (e) { out.append(err(e)); } finally { undo(); }
+  }
+  document.getElementById("apply").onclick = (ev) => {
+    const e = {};
+    for (const k of ["ant","post"]) if (pts[k].length >= 2) e[k] = pts[k];
+    if (!Object.keys(e).length) {
+      document.getElementById("fout").append(
+        err({message:"Draw at least two points first."})); return; }
+    send(e, ev.currentTarget, "Recomputing…");
+  };
+  document.getElementById("drop").onclick = (ev) => {
+    pts = {ant:[], post:[]}; draw(); send({}, ev.currentTarget, "Refitting…");
+  };
+}
+
+document.getElementById("navHome").onclick = () => home();
+home();
+</script>
+</body>
+</html>

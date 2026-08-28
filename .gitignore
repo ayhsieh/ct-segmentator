@@ -20,3 +20,7 @@ __pycache__/
 
 # vendored cuMIP landmark model: third-party code plus 41 MB of weights
 /cranial_ct_processing/
+
+# the GUI's own folder: links into patient data plus everything it generates
+/projects/
+ct_gui.log
