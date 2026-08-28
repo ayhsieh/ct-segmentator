@@ -494,7 +494,7 @@ async function project(name) {
     try {
       const cs = [...document.querySelectorAll(".ck:checked")].map(i => i.value);
       const {job} = await api("/api/scan", {project:name, cases:cs});
-      series(name, job);
+      series(name, job, null, cs);
     } catch (e) { undo(); document.getElementById("runerr").append(err(e)); }
   };
 
@@ -513,17 +513,12 @@ async function project(name) {
     try {
       /* Resolve the series before anything is queued. The pipeline asks on the command
          line when it cannot decide, and the GUI runs it with stdin closed, so an
-         unresolved case would be skipped silently and look like a run that worked. */
-      if (tasks.length) {
-        const {job} = await api("/api/scan", {project:name, cases:cs});
-        const res = await scanResults(job);
-        const need = Object.entries(res)
-          .filter(([, r]) => r.error || r.decision === "manual" || r.decision === "none")
-          .map(([c]) => c);
-        if (need.length) { undo(); return series(name, job, plan, need); }
-      }
-      const r = await api("/api/run", plan);
-      running(name, r.jobs);
+         unresolved case would be skipped silently and look like a run that worked.
+         The scan screen goes up immediately and fills in case by case, then either
+         continues on its own or waits, depending on what it found. */
+      const {job} = await api("/api/scan", {project:name, cases:cs});
+      undo();
+      return series(name, job, plan, cs);
     } catch (e) { undo(); box.append(err(e)); }
   };
 
@@ -651,34 +646,36 @@ function running(name, jobs) {
   })();
 }
 
-/* Wait for a scan job and hand back its per-case results. */
-async function scanResults(job) {
-  let out = {};
-  await follow(job, (s) => { if (s.results) out = s.results; });
-  return out;
-}
-
 /* ------------------------------------------------------ series screen */
 /* `plan` is set when we got here on the way to segmenting: the run is held until every
    case has a series, then continues by itself. `need` names the cases that blocked it. */
-async function series(name, job, plan, need) {
+async function series(name, job, plan, cases) {
   stopPoll(); crumb.textContent = name + " · series";
   view.innerHTML = "";
   view.append($(`<div>
-    <h1>Which series?</h1>
-    ${plan ? `<div class="note amber">${need.length} case(s) have more than one
-      plausible series, so segmenting is on hold until you choose:
-      <b>${esc(need.join(", "))}</b>.</div>` : ""}
+    <h1>${plan ? "Checking the scans" : "Which series?"}</h1>
+    <div id="snote"></div>
     <div id="cs"></div>
     <div class="row" style="margin-top:16px">
-      ${plan ? '<button id="go" disabled>Choose a series for each case first</button>' : ""}
+      ${plan ? '<button id="go" disabled>Reading…</button>' : ""}
       <button class="${plan ? "quiet" : ""}" id="doneb">Back to project</button>
       </div></div>`));
   document.getElementById("doneb").onclick = () => nav("project", name);
+  const snote = document.getElementById("snote");
   const cs = document.getElementById("cs");
-  cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
 
-  const unresolved = new Set(need || []);
+  /* A placeholder per case up front, so a scan that takes a minute a case shows a list
+     filling in rather than an empty screen. */
+  const slots = {};
+  for (const c of (cases || [])) {
+    slots[c] = $(`<div class="card"><div class="row"><h3>${esc(c)}</h3>
+      <span class="meta"><span class="spin dark"></span>reading…</span></div></div>`);
+    cs.append(slots[c]);
+  }
+  if (!cases || !cases.length)
+    cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
+
+  const unresolved = new Set();
   function retest() {
     const go = document.getElementById("go");
     if (!go) return;
@@ -687,28 +684,67 @@ async function series(name, job, plan, need) {
       ? `${unresolved.size} case(s) still need a series`
       : "Start segmenting";
   }
-  const go = document.getElementById("go");
-  if (go) go.onclick = async (ev) => {
-    const undo = pending(ev.currentTarget, "Queued…");
+  /* What the scan chose by itself, per case, so going ahead can record those choices
+     and the screen genuinely does not come back for the same cases. */
+  const autoPick = {};
+  async function launch(btn) {
+    const undo = pending(btn, "Starting…");
     try {
+      for (const [cse, chosen] of Object.entries(autoPick))
+        await api("/api/series/pick", {project:name, case:cse,
+          series_dir:chosen.series_dir, snum:chosen.snum, desc:chosen.desc});
       const r = await api("/api/run", plan);
       running(name, r.jobs);
-    } catch (e) { undo(); cs.append(err(e)); }
-  };
+    } catch (e) { if (undo) undo(); cs.append(err(e)); }
+  }
+  const go = document.getElementById("go");
+  if (go) go.onclick = (ev) => launch(ev.currentTarget);
 
+  let last = {};
   await follow(job, (s) => {
     if (!s.results) return;
-    cs.innerHTML = "";
-    for (const [cse, r] of Object.entries(s.results)) render(cse, r);
-    if (s.state === "running")
-      cs.append($(`<div class="meta"><span class="spin dark"></span>still reading…</div>`));
+    last = s.results;
+    for (const [cse, r] of Object.entries(s.results)) {
+      if (slots[cse] && slots[cse].dataset.done === "1") continue;
+      const card = render(cse, r);
+      if (slots[cse]) { slots[cse].replaceWith(card); slots[cse] = card; }
+      else cs.append(card);
+      card.dataset.done = "1";
+    }
     retest();
   });
 
+  if (!plan) return;
+
+  /* The scan is finished: decide whether this screen still has a job to do. Cases with
+     a recorded choice need no confirmation, so an all-cached run carries straight on -
+     the screen was the progress display. Anything else waits for a look. */
+  const blocking = Object.entries(last)
+    .filter(([, r]) => r.error || r.decision === "manual" || r.decision === "none")
+    .map(([c]) => c);
+  const unseen = Object.entries(last)
+    .filter(([, r]) => !r.error && r.decision === "auto").map(([c]) => c);
+  blocking.forEach(c => unresolved.add(c));
+  retest();
+
+  if (!blocking.length && !unseen.length) {
+    snote.append($(`<div class="note">Every case already had a series chosen. Starting
+      the segmentation…</div>`));
+    return launch(document.getElementById("go"));
+  }
+  document.querySelector("h1").textContent = "Which series?";
+  snote.append($(blocking.length
+    ? `<div class="note amber">Segmenting is on hold: <b>${esc(blocking.join(", "))}</b>
+       ${blocking.length === 1 ? "has" : "have"} more than one equally plausible series,
+       so the choice is yours.</div>`
+    : `<div class="note">First time segmenting <b>${esc(unseen.join(", "))}</b>. These
+       were picked automatically — change any of them, or go ahead. You will not be
+       asked again.</div>`));
+
   function render(cse, r) {
     if (r.error) {
-      cs.append($(`<div class="card"><h3>${esc(cse)}</h3>
-        <div class="note warn">${esc(r.error)}</div></div>`)); return;
+      return $(`<div class="card"><h3>${esc(cse)}</h3>
+        <div class="note warn">${esc(r.error)}</div></div>`);
     }
     const badge = {cached:'<span class="pill on">already chosen</span>',
                    auto:'<span class="pill on">picked automatically</span>',
@@ -719,6 +755,7 @@ async function series(name, job, plan, need) {
       <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
         <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
       <tbody></tbody></table></div>`);
+    if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
     const tb = card.querySelector("tbody");
     for (const s of r.series) {
       const chosen = r.chosen && String(r.chosen.snum) === String(s.snum);
@@ -740,6 +777,7 @@ async function series(name, job, plan, need) {
           tr.classList.add("sel");
           card.querySelector(".pill").outerHTML =
             '<span class="pill on">chosen by you</span>';
+          delete autoPick[cse];          /* the user's pick is already written */
           unresolved.delete(cse); retest();
           if (res.cleared_nifti)
             card.append($(`<div class="note amber">Removed the old converted image so
@@ -748,7 +786,7 @@ async function series(name, job, plan, need) {
       };
       tb.append(tr);
     }
-    cs.append(card);
+    return card;
   }
 }
 
