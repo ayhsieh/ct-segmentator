@@ -179,7 +179,11 @@ async function api(path, body) {
   const sep = path.includes("?") ? "&" : "?";
   const r = await fetch(path + sep + "token=" + encodeURIComponent(TOKEN), opt);
   const j = await r.json().catch(() => ({error:"the server sent something unreadable"}));
-  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  if (!r.ok) {
+    const e = new Error(j.error || ("HTTP " + r.status));
+    e.data = j;              /* callers that can act on a specific failure need it */
+    throw e;
+  }
   return j;
 }
 
@@ -476,8 +480,8 @@ async function project(name) {
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
           ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
       <td class="row" style="gap:2px">
-        ${c.converted || c.tasks.length || c.fossae || c.brain_icv
-          ? '<button class="quiet vsg">view segmentation</button>' : ''}
+        <button class="quiet vsg" title="scroll the CT, with any segmentations drawn
+          on it">view file</button>
         ${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}
         ${c.tasks.length || c.fossae || c.brain_icv
           ? '<button class="quiet sif" title="open this case\'s output folder">show in folder</button>' : ''}
@@ -1374,7 +1378,7 @@ async function viewseg(name, cse, focus) {
   view.innerHTML = "";
   view.append($(`<div>
     <div class="row" style="margin-bottom:14px">
-      <h1 style="margin:0">Segmentation</h1>
+      <h1 style="margin:0">Scan</h1>
       <span class="right"><button class="ghost" id="back">Back to project</button></span>
     </div>
     <div id="vhead"></div>
@@ -1416,10 +1420,40 @@ async function viewseg(name, cse, focus) {
     st = await api("/api/view/case?name=" + encodeURIComponent(name) +
                    "&case=" + encodeURIComponent(cse));
   } catch (e) {
+    if (e.data && e.data.needs_convert) return offerConvert();
     /* "RuntimeError: this case has not been converted yet" - the sentence after the
        colon was written for whoever is reading it; the class name in front was not. */
     g("vhead").append(err(new Error(String(e.message || e).replace(/^\w*Error: /, ""))));
     return;
+  }
+
+  /* A case whose DICOMs have never been converted has nothing to draw, but that is a
+     step away rather than a dead end - so offer it here instead of sending someone
+     back to the project screen to start a segmentation they did not want. */
+  function offerConvert() {
+    const box = $(`<div class="card">
+      <div class="row">
+        <span>This case has not been converted from DICOM yet.</span>
+        <span class="right"><button id="cvt">Convert now</button></span>
+      </div>
+      <div class="meta" id="cvtlog" style="margin-top:8px"></div></div>`);
+    g("vhead").append(box);
+    document.getElementById("cvt").onclick = async (ev) => {
+      const undo = pending(ev.currentTarget, "Converting…");
+      const log = document.getElementById("cvtlog");
+      try {
+        const {job} = await api("/api/convert", {project: name, case: cse});
+        const s = await follow(job, (t) => {
+          log.textContent = (t.lines || []).slice(-1)[0] || t.step || "working…";
+        });
+        if (s.state !== "done") throw new Error(s.error || "the conversion failed");
+        nav("viewseg", name, cse);             /* same screen, now with a scan on it */
+      } catch (e) {
+        undo();
+        log.textContent = "";
+        box.append(err(new Error(String(e.message || e).replace(/^\w*Error: /, ""))));
+      }
+    };
   }
   g("vwrap").classList.remove("hide");
   for (const w of st.warnings || []) g("vhead").append($(`<div class="note amber">${esc(w)}</div>`));
@@ -1451,9 +1485,6 @@ async function viewseg(name, cse, focus) {
      the scroll position and whatever is typed in the search box always survive. */
   const rows = [];
   const tree = g("vtree");
-  if (!st.layers.length) {
-    tree.append($(`<div class="vempty">Nothing segmented yet — the CT still scrolls.</div>`));
-  }
   for (const L of st.layers) {
     const grp = $(`<div class="vgrp"></div>`);
     const head = $(`<div class="vgrph">
@@ -1694,8 +1725,7 @@ async function viewseg(name, cse, focus) {
     label3d = left
       ? "building surfaces… " + done3d + " / " + (done3d + left)
       : "3D · " + v3d.keys().length + " structures · " +
-        Math.round(v3d.triangles() / 1000) + "k triangles · drag to spin, " +
-        "shift-drag to pan, scroll to zoom";
+        Math.round(v3d.triangles() / 1000) + "k triangles";
     if (S.mode === "3d") g("vlabel").textContent = label3d;
   }
 

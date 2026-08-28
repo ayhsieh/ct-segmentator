@@ -796,6 +796,77 @@ def scan_folder(path):
             "series": rows}
 
 
+def convert_case(group, case):
+    """Run inside the --convert child: DICOM to NIfTI for one case.
+
+    Out of process for the same reason --scan is, and it picks the series and names
+    the file exactly the way segment_structures does, so a later segmentation run
+    finds this file and reuses it rather than converting a second, differently named
+    copy.
+    """
+    from segment_structures import (get_series, get_series_metadata, score_series,
+                                    load_cache, resolve_from_cache, sanitize_filename)
+    import dicom2nifti
+    link = PROJECTS / group / case
+    if not link.exists():
+        raise RuntimeError(f"{case}: the source folder is not there")
+
+    files = desc = None
+    snum = ""
+    cache = load_cache()
+    for k in (str(link.resolve()), str(link)):
+        if k in cache:
+            files, desc, snum = resolve_from_cache(cache[k], link)
+            if files:
+                break
+    if not files:
+        # No recorded pick, so score them the way the pipeline would and take the
+        # winner only if it wins clearly. Anything closer than that is a choice for a
+        # person to make, on the screen that exists for it.
+        series_map, _ = get_series(link)
+        rows = []
+        for uid, flist in series_map.items():
+            meta = get_series_metadata(flist)
+            score, _ = score_series(meta)
+            rows.append((score, meta, flist))
+        rows.sort(key=lambda r: -r[0])
+        if not rows:
+            raise RuntimeError(f"{case}: no DICOM series found in that folder")
+        gap = rows[0][0] - (rows[1][0] if len(rows) > 1 else -999)
+        if rows[0][0] < AUTO_MIN_SCORE or gap < AUTO_MIN_GAP:
+            raise RuntimeError(
+                f"{case}: more than one series could be the right one. Use "
+                "Check series first on the project page and pick one.")
+        files, desc, snum = rows[0][2], rows[0][1]["desc"], rows[0][1]["snum"]
+
+    out = nifti_dir_for(group) / case
+    out.mkdir(parents=True, exist_ok=True)
+    stem = sanitize_filename(f"series_{snum}_{desc}") if desc else f"series_{snum}_unnamed"
+    path = out / f"{stem}.nii.gz"
+    if path.exists():
+        return str(path)
+    dicom2nifti.dicom_series_to_nifti(str(Path(files[0]).parent), str(path))
+    return str(path)
+
+
+def job_convert(project, cases):
+    """Convert without segmenting, so a scan can be looked at before anything is run."""
+    def make(case):
+        def run(job):
+            argv = PY + ["ct_gui.py", "--convert", project, case]
+            r = subprocess.run(argv, cwd=str(APP), env=child_env(), capture_output=True,
+                               text=True, stdin=subprocess.DEVNULL, errors="replace")
+            if r.returncode != 0:
+                raise RuntimeError((r.stderr or r.stdout or "conversion failed").strip()
+                                   .splitlines()[-1])
+            job.emit(f"{case}: converted")
+        return run
+
+    steps = [(f"converting {c}", make(c)) for c in cases]
+    return Job("convert", project, f"convert {len(cases)} case(s)", steps,
+               queue_name="light")
+
+
 def write_pick(link_path, series_dir, snum, desc):
     """Record a series choice where segment_structures will find it.
 
@@ -983,15 +1054,16 @@ def slice2d(arr, plane, i):
     return arr[i, ::-1, ::-1].T          # rows: S at top    cols: A at left
 
 
+class NeedsConvert(RuntimeError):
+    """No NIfTI for this case yet. Its own type because the page can act on it - it
+    offers to convert - where an ordinary error would only be reported."""
+
+
 def _ct_path(group, case):
     d = nifti_dir_for(group) / case
     hits = sorted(d.glob("*.nii.gz")) if d.is_dir() else []
     if not hits:
-        raise RuntimeError(
-            "the converted CT for this case is missing, so there is nothing to draw "
-            "the segmentation on. If it has never been segmented, segment it. If it "
-            "has, the converted image was cleared - pick any task, tick 're-run even "
-            "if done', and it will be rebuilt.")
+        raise NeedsConvert("this case has not been converted from DICOM yet")
     return hits[0]                       # the same one find_source_nifti picks
 
 
@@ -1558,7 +1630,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "no map yet"}, 404)
                 return self._send(200, hits[0].read_bytes(), "image/png")
             if u.path == "/api/view/case":
-                return self._json(view_case(self._project(q), self._case(q)))
+                try:
+                    return self._json(view_case(self._project(q), self._case(q)))
+                except NeedsConvert as e:
+                    # Not an error so much as a next step, and the page offers it.
+                    return self._json({"error": str(e), "needs_convert": True}, 409)
             if u.path == "/api/view/slice.png":
                 plane = q.get("plane", "axial")
                 png = view_slice_png(
@@ -1651,6 +1727,13 @@ class Handler(BaseHTTPRequestHandler):
                 pr = load_project(name)
                 cases = body.get("cases") or [c["case"] for c in pr["cases"]]
                 return self._json({"job": submit(job_scan(name, cases)).id})
+
+            if u.path == "/api/convert":
+                name = self._project(body)
+                case = body.get("case", "")
+                if not SAFE_NAME.match(case):
+                    return self._json({"error": f"not a case name: {case!r}"}, 400)
+                return self._json({"job": submit(job_convert(name, [case])).id})
 
             if u.path == "/api/series/pick":
                 name = self._project(body)
@@ -1756,11 +1839,16 @@ def main():
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--open", action="store_true", help="open a browser too")
     ap.add_argument("--scan", metavar="PATH", help="internal: score a folder's series")
+    ap.add_argument("--convert", nargs=2, metavar=("GROUP", "CASE"),
+                    help="internal: convert one case from DICOM to NIfTI")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
     if args.scan:
         print(json.dumps(scan_folder(args.scan)))
+        return
+    if args.convert:
+        print(convert_case(*args.convert))
         return
     if args.selftest:
         return selftest()

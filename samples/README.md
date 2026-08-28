@@ -31,5 +31,6 @@ python samples/make_fixtures.py
 
 `SHAPES_TEST` is a sphere, a cube, a slab running off the edge of the volume, and a
 nested ICV/brain pair written as the 4-D two-layer `.seg.nrrd` that `brain_icv`
-produces. `MANY_TEST` is sixty blobs, for the 3D display cap and for timing. Delete
-both from the project list when you are done.
+produces. `MANY_TEST` is sixty blobs, for the 3D display cap and for timing.
+`DICOM_TEST` is a synthetic DICOM series left unconverted, for the convert-on-demand
+path. Delete them from the project list when you are done.

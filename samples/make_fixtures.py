@@ -109,7 +109,68 @@ def many():
     print(f"  {group}: 60 blobs")
 
 
+def dicom():
+    """A DICOM series that has never been converted, for the convert-on-demand path.
+
+    Written out rather than borrowed from a real study for the obvious reason, and it
+    exercises the bit that matters: series scoring has to pick this one, and the
+    converter has to produce the spacing and orientation the tags describe.
+    """
+    import datetime
+    from pydicom.dataset import Dataset, FileDataset
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
+
+    group, case = "DICOM_TEST", "RAW"
+    p = APP / "projects" / group
+    raw = p / case
+    raw.mkdir(parents=True, exist_ok=True)
+    for f in raw.glob("*.dcm"):
+        f.unlink()
+    nx = ny = 96
+    nslices = 24
+    px = py = 0.8
+    thick = 2.0
+    study, series, frame = generate_uid(), generate_uid(), generate_uid()
+    gx, gy = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+    for k in range(nslices):
+        a = np.full((ny, nx), -1000, np.int16)
+        r = 34 - abs(k - nslices // 2) * 0.8
+        if r > 4:
+            head = ((gx - nx / 2) ** 2 + (gy - ny / 2) ** 2) < r * r
+            a[head.T] = 40
+            a[(head & (((gx - nx / 2) ** 2 + (gy - ny / 2) ** 2) > (r - 3) ** 2)).T] = 900
+        meta = Dataset()
+        meta.MediaStorageSOPClassUID = CTImageStorage
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = FileDataset(str(raw / f"s{k:03d}.dcm"), {}, file_meta=meta,
+                         preamble=b"\0" * 128)
+        ds.SOPClassUID = CTImageStorage
+        ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
+        ds.StudyInstanceUID, ds.SeriesInstanceUID = study, series
+        ds.FrameOfReferenceUID = frame
+        ds.PatientName, ds.PatientID = "PHANTOM^SYNTHETIC", "SYNTH001"
+        ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "CT", 2, k + 1
+        ds.SeriesDescription = "Head Synthetic 2.0 Hr40"
+        ds.StudyDate = ds.SeriesDate = datetime.date(2026, 1, 1).strftime("%Y%m%d")
+        ds.Rows, ds.Columns = ny, nx
+        ds.PixelSpacing = [py, px]
+        ds.SliceThickness = ds.SpacingBetweenSlices = thick
+        ds.ImagePositionPatient = [-nx * px / 2, -ny * py / 2, k * thick]
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 16, 16, 15
+        ds.PixelRepresentation = 1
+        ds.RescaleIntercept, ds.RescaleSlope = 0, 1
+        ds.ConvolutionKernel = "Hr40"
+        ds.PixelData = a.tobytes()
+        ds.save_as(str(raw / f"s{k:03d}.dcm"), write_like_original=False)
+    register(p, group, case, "synthetic DICOM series - tests convert on demand")
+    print(f"  {group}: {nslices} DICOM slices, deliberately not converted")
+
+
 if __name__ == "__main__":
     shapes()
     many()
+    dicom()
     print("  done - open them from the project list.")
