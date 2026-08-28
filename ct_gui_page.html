@@ -30,7 +30,9 @@ a{color:inherit}
 header{border-bottom:1px solid var(--line);padding:14px 0;margin-bottom:34px}
 header .in{max-width:840px;margin:0 auto;padding:0 22px;display:flex;
   align-items:center;gap:14px}
-.brand{font-family:var(--sans);font-weight:700;letter-spacing:-.02em;font-size:19px}
+.brand{font-family:var(--sans);font-weight:700;letter-spacing:-.02em;font-size:19px;
+  cursor:pointer}
+.brand:hover{opacity:.7}
 .crumb{color:var(--faint);font-family:var(--sans);font-size:14px}
 main{max-width:840px;margin:0 auto;padding:0 22px 90px}
 button{font-size:14px;font-weight:500;padding:8px 16px;border-radius:99px;
@@ -101,7 +103,7 @@ canvas{border:1px solid var(--line);border-radius:6px;cursor:crosshair;
 </head>
 <body>
 <header><div class="in">
-  <span class="brand">CT Segmentation</span>
+  <span class="brand" id="brand" title="back to your projects">CT Segmentation</span>
   <span class="crumb" id="crumb"></span>
   <span class="right"><button class="quiet" id="navHome">All projects</button></span>
 </div></header>
@@ -205,6 +207,8 @@ async function home() {
     for (const p of projects) {
       const c = $(`<div class="card click">
         <h3>${esc(p.name)}</h3>
+        ${p.description ? `<div style="font-size:16px;margin:2px 0 6px">${
+          esc(p.description)}</div>` : ""}
         <div class="meta">${p.cases} case${p.cases===1?"":"s"} &middot;
           ${esc(p.source)} &middot; created ${esc(p.created||"")}</div></div>`);
       c.onclick = () => nav("project", p.name);
@@ -248,6 +252,8 @@ async function newProject(preset) {
         <div class="row" style="margin-top:14px">
           <input type="text" id="pname" placeholder="Project name"
                  style="max-width:280px" value="${esc(cur.split(/[\\\\/]/).pop())}">
+          <input type="text" id="pdesc" placeholder="What is this? (optional)"
+                 style="max-width:340px">
           <button id="create">Create project</button></div>
         <div id="cerr"></div></div>`);
       found.append(box);
@@ -273,7 +279,8 @@ async function newProject(preset) {
         const cerr = document.getElementById("cerr"); cerr.innerHTML = "";
         try {
           const res = await api("/api/project/create", {
-            name: document.getElementById("pname").value, source: cur, cases});
+            name: document.getElementById("pname").value, source: cur, cases,
+            description: document.getElementById("pdesc").value});
           if (res.failed && res.failed.length)
             alert("Some cases could not be linked:\n" + res.failed.join("\n"));
           nav("project", res.name);
@@ -334,6 +341,7 @@ async function project(name) {
   const offline = st.case_status.filter(c => !c.online);
   view.append($(`<div>
     <h1>${esc(name)}</h1>
+    <div id="desc" style="margin:0 0 4px"></div>
     <p class="sub">${st.case_status.length} case(s) &middot;
       <span class="mono">${esc(st.source || "")}</span></p>
     ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
@@ -356,6 +364,39 @@ async function project(name) {
     <h2>Results</h2>
     <div id="results"></div>
     </div>`));
+
+  /* Click the description to edit it; Enter or blur saves, Escape puts it back. No
+     separate edit button, and no save button to forget to press. */
+  const dbox = document.getElementById("desc");
+  let dtext = st.description || "";
+  function showDesc() {
+    dbox.innerHTML = "";
+    const d = $(`<div style="cursor:text${dtext ? "" : ";color:var(--faint)"}"
+      title="click to edit">${esc(dtext || "Add a description")}</div>`);
+    d.onclick = editDesc;
+    dbox.append(d);
+  }
+  function editDesc() {
+    dbox.innerHTML = "";
+    const i = $(`<input type="text" style="max-width:520px"
+      placeholder="What is this project about?">`);
+    i.value = dtext;
+    let closed = false;
+    const save = async (keep) => {
+      if (closed) return; closed = true;
+      if (!keep) return showDesc();
+      const v = i.value.trim();
+      if (v === dtext) return showDesc();
+      dtext = v; showDesc();
+      try { await api("/api/project/describe", {project: name, description: v}); }
+      catch (e) { dbox.append(err(e)); }
+    };
+    i.onkeydown = (e) => { if (e.key === "Enter") save(true);
+                           else if (e.key === "Escape") save(false); };
+    i.onblur = () => save(true);
+    dbox.append(i); i.focus(); i.select();
+  }
+  showDesc();
 
   const doneTasks = new Set();
   st.case_status.forEach(c => c.tasks.forEach(x => doneTasks.add(x)));
@@ -790,6 +831,7 @@ async function fossa(name, cse) {
 }
 
 document.getElementById("navHome").onclick = () => nav("home");
+document.getElementById("brand").onclick = () => nav("home");
 route();
 </script>
 </body>

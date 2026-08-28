@@ -948,6 +948,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"projects": [
                     {"name": p["name"], "cases": len(p.get("cases", [])),
                      "source": p.get("source", ""),
+                     "description": p.get("description", ""),
                      "created": p.get("created", "")} for p in list_projects()]})
             if u.path == "/api/project":
                 return self._json(project_state(self._project(q)))
@@ -1036,8 +1037,16 @@ class Handler(BaseHTTPRequestHandler):
                                        + "; ".join(failed[:3])}, 400)
                 save_project({"name": name, "source": str(src),
                               "created": time.strftime("%Y-%m-%d %H:%M"),
+                              "description": (body.get("description") or "").strip()[:2000],
                               "cases": cases})
                 return self._json({"name": name, "linked": made, "failed": failed})
+
+            if u.path == "/api/project/describe":
+                name = self._project(body)
+                pr = load_project(name)
+                pr["description"] = (body.get("description") or "").strip()[:2000]
+                save_project(pr)
+                return self._json({"description": pr["description"]})
 
             if u.path == "/api/project/delete":
                 name = self._project(body)
