@@ -12,13 +12,14 @@
 # Absolute, so the helper is found no matter where this is sourced from.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-NEEDS_MODULES="totalsegmentator pydicom dicom2nifti nibabel numpy scipy matplotlib pandas nrrd"
+NEEDS_MODULES="totalsegmentator pydicom dicom2nifti nibabel numpy scipy matplotlib pandas nrrd xmltodict skimage"
 
 # pip names differ from import names in two places, so a missing module cannot simply
 # be handed to pip.
 pip_name_for() {
   case "$1" in
     nrrd) echo pynrrd ;;
+    skimage) echo scikit-image ;;
     *) echo "$1" ;;
   esac
 }

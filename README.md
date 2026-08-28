@@ -81,7 +81,7 @@ open **Anaconda Prompt**, and run:
 ```bash
 conda create -n segmentator python=3.10 -y
 conda activate segmentator
-pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd totalsegmentator torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd xmltodict scikit-image totalsegmentator torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
 Drop `--index-url ...` if you have no NVIDIA graphics card. Then double-click

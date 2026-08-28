@@ -18,6 +18,7 @@ if not defined PARTIAL_PY goto :nothing
 rem pip names differ from import names in one place, so the missing module list cannot
 rem simply be handed to pip.
 set "ADD=%PARTIAL_MISSING:nrrd=pynrrd%"
+set "ADD=%ADD:skimage=scikit-image%"
 
 echo.
 echo   This computer already has most of what is needed:
@@ -59,7 +60,7 @@ echo.
 echo   Open Anaconda Prompt and run:
 echo       conda create -n segmentator python=3.10
 echo       conda activate segmentator
-echo       pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd totalsegmentator torch torchvision torchaudio
+echo       pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd xmltodict scikit-image totalsegmentator torch torchvision torchaudio
 echo.
 echo   Then double-click this file again - it will find that environment on its own.
 echo.

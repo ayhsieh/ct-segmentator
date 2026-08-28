@@ -110,8 +110,14 @@ fi
 
 echo "  [3/3] Installing the segmentation packages. This is the long part..."
 "$PY" -m pip install --upgrade pip >/dev/null 2>&1
+# xmltodict is imported by totalsegmentator.nifti_ext_header but missing from
+# TotalSegmentator's own requirements, so pip will not bring it in. Without it a
+# segmentation runs to completion, fails silently at the conversion step, writes no
+# .seg.nrrd - and the next run, which decides what is done by looking for that file,
+# segments the whole case again.
 "$PY" -m pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas \
-      pynrrd totalsegmentator torch torchvision torchaudio || fail "a package would not install"
+      pynrrd xmltodict scikit-image totalsegmentator torch torchvision torchaudio \
+      || fail "a package would not install"
 
 verify_python "$PY" || fail "TotalSegmentator did not install correctly"
 
