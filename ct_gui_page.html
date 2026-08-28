@@ -6,9 +6,13 @@
 <title>CT Segmentation</title>
 <style>
 :root{
-  --ink:#191919; --mid:#6b6b6b; --faint:#a1a1a1; --line:#e6e6e6; --bg:#fff;
-  --accent:#1a8917; --accentdim:#e8f3e8; --warn:#c0392b; --warnbg:#fdeeec;
-  --amber:#b7791f; --amberbg:#fdf6e3; --panel:#fafafa;
+  /* A warm paper ground rather than white - the same page for hours is easier to read
+     off a slightly tinted background, and the surfaces stay distinguishable because
+     cards sit lighter than the page instead of the other way round. */
+  --ink:#211f1b; --mid:#6a655c; --faint:#9d9689; --line:#e3ddd1; --bg:#f6f2ea;
+  --surface:#fdfbf7; --panel:#efe9dd; --edge:#d6cec0;
+  --accent:#1a7d3c; --accentdim:#e2eee0; --warn:#b23b2b; --warnbg:#f8e6e1;
+  --amber:#9d6f16; --amberbg:#f6eed7;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --serif:Charter,"Iowan Old Style","Source Serif Pro",Georgia,Cambria,"Times New Roman",serif;
 }
@@ -33,35 +37,39 @@ button{font-size:14px;font-weight:500;padding:8px 16px;border-radius:99px;
   border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;
   transition:opacity .15s}
 button:hover:not(:disabled){opacity:.82}
-button.ghost{background:transparent;color:var(--ink);border-color:#ccc}
+button.ghost{background:var(--surface);color:var(--ink);border-color:var(--edge)}
 button.quiet{background:transparent;color:var(--mid);border-color:transparent;
   padding:6px 8px;text-decoration:underline}
 button:disabled{opacity:.45;cursor:default}
 button.busy{background:var(--mid);border-color:var(--mid)}
 input[type=text],input[type=search]{font-family:var(--sans);font-size:15px;
-  padding:9px 12px;border:1px solid #d5d5d5;border-radius:6px;width:100%}
+  padding:9px 12px;border:1px solid var(--edge);border-radius:6px;width:100%;
+  background:var(--surface);color:var(--ink)}
+input[type=text]:focus,input[type=search]:focus{outline:2px solid var(--accentdim);
+  border-color:var(--accent)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 12px}
-.card.click{cursor:pointer}
-.card.click:hover{border-color:#c9c9c9;background:var(--panel)}
+.card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 12px;
+  background:var(--surface)}
+.card.click{cursor:pointer;transition:border-color .15s,background .15s}
+.card.click:hover{border-color:var(--edge);background:#fffdfa}
 .meta{color:var(--mid);font-size:14px;font-family:var(--sans)}
 .pill{display:inline-block;font-family:var(--sans);font-size:12px;padding:2px 9px;
-  border-radius:99px;background:#f0f0f0;color:var(--mid);margin:0 5px 5px 0}
+  border-radius:99px;background:var(--panel);color:var(--mid);margin:0 5px 5px 0}
 .pill.on{background:var(--accentdim);color:var(--accent)}
 .pill.warn{background:var(--warnbg);color:var(--warn)}
 .pill.amber{background:var(--amberbg);color:var(--amber)}
-.empty{border:1px dashed #ddd;border-radius:10px;padding:40px 22px;text-align:center;
+.empty{border:1px dashed var(--edge);border-radius:10px;padding:40px 22px;text-align:center;
   color:var(--mid)}
 table{width:100%;border-collapse:collapse;font-family:var(--sans);font-size:14px}
 th{text-align:left;font-weight:600;color:var(--mid);border-bottom:1px solid var(--line);
   padding:7px 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-td{padding:8px;border-bottom:1px solid #f2f2f2;vertical-align:top}
+td{padding:8px;border-bottom:1px solid #ece6da;vertical-align:top}
 tr.sel td{background:var(--accentdim)}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
-#log{background:#fbfbfb;border:1px solid var(--line);border-radius:8px;padding:12px 14px;
-  height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+#log{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:12px 14px;height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word}
 #log div{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:12.5px;line-height:1.5;color:#333}
+  font-size:12.5px;line-height:1.5;color:#3b382f}
 #log div.cmd{color:var(--faint)}
 #log div.bad{color:var(--warn)}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid #fff6;
@@ -69,10 +77,11 @@ tr.sel td{background:var(--accentdim)}
   vertical-align:-2px;margin-right:7px}
 .spin.dark{border:2px solid #0002;border-top-color:var(--mid)}
 @keyframes sp{to{transform:rotate(360deg)}}
-.bar{height:4px;background:#eee;border-radius:99px;overflow:hidden;margin:10px 0}
+.bar{height:4px;background:var(--panel);border-radius:99px;overflow:hidden;margin:10px 0}
 .bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
-.tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px}
-.tasklist label{display:flex;gap:11px;padding:10px 14px;border-bottom:1px solid #f4f4f4;
+.tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface)}
+.tasklist label{display:flex;gap:11px;padding:10px 14px;border-bottom:1px solid #ece6da;
   cursor:pointer;align-items:flex-start}
 .tasklist label:hover{background:var(--panel)}
 .tasklist input{margin-top:4px}
@@ -138,19 +147,41 @@ function fmtTime(s) {
   return s < 60 ? s + "s" : Math.floor(s/60) + "m " + String(s%60).padStart(2,"0") + "s";
 }
 
+/* The back button should mean what it means on every other site. Each screen worth
+   returning to owns a hash, and the hash is the only thing that renders - so back,
+   forward and a reloaded tab all land in the same place. The transient screens (a
+   running job, a series scan) deliberately have none: back from those means the
+   project they belong to, which is where the hash still points. */
+const ROUTES = {
+  home:    ()  => home(),
+  new:     ()  => newProject(),
+  project: (a) => project(a[0]),
+  fossa:   (a) => fossa(a[0], a[1]),
+};
+function nav(v, ...args) {
+  const h = "#" + [v].concat(args.map(encodeURIComponent)).join("/");
+  if (location.hash === h) route();      /* same screen: re-render, no history entry */
+  else location.hash = h;                /* otherwise hashchange does the rendering */
+}
+function route() {
+  const parts = location.hash.replace(/^#/, "").split("/")
+                  .filter(Boolean).map(decodeURIComponent);
+  const v = parts.shift() || "home";
+  (ROUTES[v] || ROUTES.home)(parts);
+}
+window.addEventListener("hashchange", route);
+
 /* ---------------------------------------------------------------- home */
 async function home() {
   stopPoll(); crumb.textContent = "";
   view.innerHTML = "";
   view.append($(`<div>
     <h1>Your projects</h1>
-    <p class="sub">A project points at a folder of scans. Nothing is copied and nothing
-    leaves this computer.</p>
     <div class="row" style="margin-bottom:22px">
       <button id="new">New project</button>
     </div>
     <div id="list"></div></div>`));
-  document.getElementById("new").onclick = () => newProject();
+  document.getElementById("new").onclick = () => nav("new");
   const list = document.getElementById("list");
   list.append($(`<div class="meta"><span class="spin dark"></span>loading…</div>`));
   try {
@@ -166,7 +197,7 @@ async function home() {
         <h3>${esc(p.name)}</h3>
         <div class="meta">${p.cases} case${p.cases===1?"":"s"} &middot;
           ${esc(p.source)} &middot; created ${esc(p.created||"")}</div></div>`);
-      c.onclick = () => project(p.name);
+      c.onclick = () => nav("project", p.name);
       list.append(c);
     }
   } catch (e) { list.innerHTML = ""; list.append(err(e)); }
@@ -181,10 +212,15 @@ async function newProject() {
   view.innerHTML = "";
   view.append($(`<div>
     <h1>Point at your scans</h1>
-    <p class="sub">Pick the folder that holds one subfolder per patient. Folders with
-    DICOM files in them are marked.</p>
-    <div id="crumbs" class="row" style="margin-bottom:10px"></div>
-    <div id="browser" class="card" style="max-height:330px;overflow:auto"></div>
+    <div class="row" style="margin-bottom:8px">
+      <button id="pick">Choose folder…</button>
+      <button class="quiet" id="toggle">or browse here</button>
+    </div>
+    <div id="pickerr"></div>
+    <div id="manual" class="hide">
+      <div id="crumbs" class="row" style="margin:10px 0">   </div>
+      <div id="browser" class="card" style="max-height:330px;overflow:auto"></div>
+    </div>
     <div id="found"></div></div>`));
   let cur = null;
   const browser = document.getElementById("browser");
@@ -267,12 +303,38 @@ async function newProject() {
             name: document.getElementById("pname").value, source: cur, cases});
           if (res.failed && res.failed.length)
             alert("Some cases could not be linked:\n" + res.failed.join("\n"));
-          project(res.name);
+          nav("project", res.name);
         } catch (e) { undo(); cerr.append(err(e)); }
       };
     } catch (e) { done(); found.append(err(e)); }
   }
-  go("");
+  /* The real OS folder chooser, opened by the server on this same machine. A browser
+     cannot give us a folder path on its own, and typing one out is worse than either. */
+  const manual = document.getElementById("manual");
+  const pickerr = document.getElementById("pickerr");
+  let browsed = false;
+  document.getElementById("toggle").onclick = () => {
+    manual.classList.toggle("hide");
+    if (!browsed) { browsed = true; go(""); }
+  };
+  document.getElementById("pick").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Choose a folder…");
+    pickerr.innerHTML = "";
+    try {
+      const r = await api("/api/pick", {start: cur || ""});
+      undo();
+      if (r.unavailable) {
+        pickerr.append($(`<div class="note amber">This computer has no folder dialog
+          (${esc(r.unavailable)}). Use <b>or browse here</b> instead.</div>`));
+        manual.classList.remove("hide"); if (!browsed) { browsed = true; go(""); }
+        return;
+      }
+      if (!r.path) return;                       /* cancelled - say nothing */
+      cur = r.path;
+      pickerr.append($(`<div class="note"><span class="mono">${esc(cur)}</span></div>`));
+      detect(document.getElementById("pick"));
+    } catch (e) { undo(); pickerr.append(err(e)); }
+  };
 }
 
 /* ---------------------------------------------------------- project */
@@ -297,10 +359,8 @@ async function project(name) {
       folder that is not there right now - is the drive connected?</div>` : ""}
     <div id="cases"></div>
     <h2>Segment</h2>
-    <p class="sub" style="margin-bottom:12px">Tick what you want. Anything already done
-      is marked, and is skipped unless you ask for a re-run.</p>
     <div class="row" style="margin-bottom:10px">
-      <input type="search" id="q" placeholder="Search 25 structures…" style="max-width:320px">
+      <input type="search" id="q" placeholder="Search 40 structures…" style="max-width:320px">
       <label class="ui meta"><input type="checkbox" id="force"> re-run even if done</label>
     </div>
     <div class="tasklist" id="tl"></div>
@@ -336,7 +396,7 @@ async function project(name) {
       <td>${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}</td>
     </tr>`);
     const rev = tr.querySelector(".rev");
-    if (rev) rev.onclick = () => fossa(name, c.case);
+    if (rev) rev.onclick = () => nav("fossa", name, c.case);
     tbl.querySelector("tbody").append(tr);
   }
   cases.append(tbl);
@@ -373,7 +433,16 @@ async function project(name) {
       .map(i => i.value).filter(v => t.tasks.find(x => x.name === v && x.licensed));
     const box = document.getElementById("lic");
     box.innerHTML = "";
-    if (need.length) box.append($(`<div class="note amber">
+    if (!need.length) return;
+    /* TotalSegmentator stores a licence once and reuses it, so when one is already
+       registered on this machine there is nothing to ask for. */
+    if (t.license_stored) {
+      box.append($(`<div class="note">
+        <b>${esc(need.join(", "))}</b> need a licence &mdash; one is already registered
+        on this computer, so they will just run.</div>`));
+      return;
+    }
+    box.append($(`<div class="note amber">
       <b>${esc(need.join(", "))}</b> need a free non-commercial licence number.
       <input type="text" id="licno" placeholder="licence number"
              style="max-width:260px;margin-top:8px"></div>`));
@@ -468,7 +537,7 @@ function running(name, jobs) {
       <span class="right meta" id="clock"></span></div>
     <div id="log"></div></div>`));
   const log = document.getElementById("log");
-  document.getElementById("back").onclick = () => project(name);
+  document.getElementById("back").onclick = () => nav("project", name);
   let cur = 0;
   document.getElementById("cancel").onclick = async (ev) => {
     const undo = pending(ev.currentTarget, "Stopping…");
@@ -510,7 +579,7 @@ function running(name, jobs) {
     document.getElementById("head").textContent = "Finished.";
     document.getElementById("bar").style.width = "100%";
     const b = $(`<button style="margin-top:14px">See results</button>`);
-    b.onclick = () => project(name);
+    b.onclick = () => nav("project", name);
     document.getElementById("log").after(b);
   })();
 }
@@ -521,15 +590,10 @@ async function series(name, job) {
   view.innerHTML = "";
   view.append($(`<div>
     <h1>Which series?</h1>
-    <p class="sub">A scan usually holds several reconstructions. The pipeline scores
-    them and picks one; where two are close it needs you to decide.</p>
-    <div class="note">Not sure? Open the folder in 3D Slicer and look at the series -
-    you want a soft-tissue axial reconstruction of the whole head, not a bone kernel or
-    a coronal reformat.</div>
     <div id="cs"></div>
     <div class="row" style="margin-top:16px">
       <button id="doneb">Back to project</button></div></div>`));
-  document.getElementById("doneb").onclick = () => project(name);
+  document.getElementById("doneb").onclick = () => nav("project", name);
   const cs = document.getElementById("cs");
   cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
 
@@ -593,9 +657,8 @@ async function fossa(name, cse) {
   view.innerHTML = "";
   view.append($(`<div>
     <h1>Fossa boundaries</h1>
-    <p class="sub">${esc(cse)} &mdash; the skull floor seen from above. Light is a high
-    shelf, dark is a deep basin. Click left to right to draw a boundary where you think
-    it should be.</p>
+    <p class="sub">${esc(cse)} &mdash; skull floor from above. Light is high, dark is
+    deep. Click left to right to draw a boundary.</p>
     <div class="row" style="margin-bottom:10px">
       <button class="ghost" id="mAnt">Trace anterior</button>
       <button class="ghost" id="mPost">Trace posterior</button>
@@ -610,7 +673,7 @@ async function fossa(name, cse) {
       <button class="ghost" id="drop">Drop corrections</button>
       <button class="quiet" id="back">Back</button></div>
     <div id="fout"></div></div>`));
-  document.getElementById("back").onclick = () => project(name);
+  document.getElementById("back").onclick = () => nav("project", name);
 
   const cv = document.getElementById("cv"), cx = cv.getContext("2d");
   let ST = null, mode = "post", pts = {ant:[], post:[]};
@@ -712,8 +775,8 @@ async function fossa(name, cse) {
   };
 }
 
-document.getElementById("navHome").onclick = () => home();
-home();
+document.getElementById("navHome").onclick = () => nav("home");
+route();
 </script>
 </body>
 </html>

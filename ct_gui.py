@@ -71,32 +71,99 @@ FBIN_MM = _literal(APP / "segment_fossae.py", "FBIN_MM").get("FBIN_MM", 1.5)
 # One-line descriptions so the list means something to someone who has not read the
 # TotalSegmentator paper. Anything unlisted still appears, just without a blurb.
 BLURB = {
-    "total": "104 structures across the whole body - organs, bones, muscles, vessels",
+    "total": "117 structures across the whole body - organs, bones, muscles, vessels",
     "total_mr": "the whole-body set, for MR instead of CT",
-    "brain_structures": "brain regions: lobes, cerebellum, brainstem, ventricles, CSF",
-    "brain_structures_mr": "brain regions, for MR",
+    "body": "body outline, trunk, extremities and skin",
+    "body_mr": "body outline and extremities, for MR",
+    "vertebrae_mr": "individual vertebrae C1-L5 and the sacrum, for MR",
+    "lung_vessels": "pulmonary arteries, veins, airways and airway walls",
+    "lung_nodules": "lung nodules",
     "cerebral_bleed": "intracerebral haemorrhage",
-    "brain_aneurysm": "intracranial aneurysms",
+    "brain_aneurysm": "intracranial aneurysms - TOF MR only, not CT",
+    "ventricle_parts": "the ventricles split into their parts",
+    "hip_implant": "hip prostheses",
+    "pleural_pericard_effusion": "pleural and pericardial effusion",
+    "liver_vessels": "hepatic vessels and tumours",
+    "liver_segments": "the Couinaud liver segments",
+    "liver_segments_mr": "the Couinaud liver segments, for MR",
+    "kidney_cysts": "renal cysts",
+    "breasts": "breast tissue",
+    "head_glands_cavities": "eyes, glands and the air cavities of the head",
+    "head_muscles": "facial and masticatory muscles",
+    "headneck_bones_vessels": "laryngeal structures, cartilage and neck vessels",
+    "headneck_muscles": "neck and pharyngeal muscles",
+    "oculomotor_muscles": "the extraocular muscles and optic nerve",
+    "craniofacial_structures": "mandible, teeth, skull and sinuses",
+    "teeth": "the teeth individually",
+    "abdominal_muscles": "the core and torso muscles",
+    "trunk_cavities": "the abdominal and thoracic cavities, and the mediastinum",
+    "brain_structures": "brain regions: lobes, cerebellum, brainstem, ventricles, CSF",
     "face": "the face, for defacing/anonymising",
     "face_mr": "the face, for MR",
-    "oculomotor_muscles": "the extraocular muscles and optic nerve",
     "vertebrae_body": "vertebral bodies without the posterior elements",
+    "heartchambers_highres": "the four heart chambers at high resolution",
+    "coronary_arteries": "the coronary tree",
+    "aortic_sinuses": "the aortic valve cusps and outflow tract",
     "appendicular_bones": "arm and leg bones",
     "appendicular_bones_mr": "arm and leg bones, for MR",
-    "tissue_types": "subcutaneous fat, torso fat, skeletal muscle",
-    "heartchambers_highres": "the four heart chambers at high resolution",
-    "body": "body outline, extremities and trunk",
-    "hip_implant": "hip prostheses",
-    "lung_vessels": "pulmonary arteries and veins",
-    "lung_vessels_LEGACY": "older pulmonary vessel model",
-    "lung_nodules": "lung nodules",
-    "liver_vessels": "hepatic vessels and tumours",
-    "coronary_arteries": "the coronary tree",
-    "coronary_arteries_LEGACY": "older coronary model",
-    "pleural_pericard_effusion": "pleural and pericardial effusion",
-    "kidney_cysts": "renal cysts",
     "thigh_shoulder_muscles": "thigh and shoulder muscle groups",
+    "thigh_shoulder_muscles_mr": "thigh and shoulder muscles, for MR",
+    "tissue_types": "subcutaneous fat, torso fat, skeletal muscle",
+    "tissue_types_mr": "the same tissue types, for MR",
+    "tissue_4_types": "the tissue types plus intermuscular fat",
 }
+
+# Whether TotalSegmentator already holds a valid licence. Asked once, in a subprocess,
+# so the answer costs nothing at startup and torch never loads into the server. When a
+# licence is already stored the UI stops demanding a number for the licensed tasks -
+# they will simply run, exactly as they do from the command line.
+_LICENSE_STATE = None
+
+
+def license_stored():
+    global _LICENSE_STATE
+    if _LICENSE_STATE is None:
+        _LICENSE_STATE = False
+        try:
+            r = subprocess.run(
+                [sys.executable, "-c", "from totalsegmentator.config import "
+                 "has_valid_license_offline as h; print(h()[0])"],
+                capture_output=True, text=True, timeout=60)
+            _LICENSE_STATE = r.stdout.strip().endswith("yes")
+        except Exception:
+            pass
+    return _LICENSE_STATE
+
+# A browser cannot hand a page a folder path - the file input gives file contents, not
+# a location, which is useless when the point is to segment a folder in place. But the
+# server is on the same machine as the person clicking, so it can open the real OS
+# folder chooser itself. It runs in a subprocess: Tk must own the main thread, and this
+# one is a request thread, and a dialog that hangs then cannot take the server with it.
+_PICKER = r"""
+import sys, tkinter, tkinter.filedialog
+r = tkinter.Tk(); r.withdraw()
+r.attributes("-topmost", True)      # otherwise it opens behind the browser window
+p = tkinter.filedialog.askdirectory(title="Choose the folder that holds your scans",
+                                    initialdir=(sys.argv[1] or None), mustexist=True)
+r.destroy()
+sys.stdout.write(p or "")
+"""
+
+
+def native_folder_dialog(start=""):
+    """Return (path, unavailable_reason). An empty path with no reason means cancelled."""
+    try:
+        r = subprocess.run([sys.executable, "-c", _PICKER, str(start)],
+                           capture_output=True, text=True, timeout=600)
+    except Exception as e:
+        return "", str(e)
+    if r.returncode != 0:
+        # no display, or a python built without Tk - the built-in browser still works
+        tail = (r.stderr or "").strip().splitlines()
+        return "", (tail[-1] if tail else "no folder dialog available here")
+    p = r.stdout.strip()
+    return (p if p and Path(p).is_dir() else ""), ""
+
 
 # The two derived analyses in this repo, which are not TotalSegmentator tasks
 ANALYSES = {
@@ -885,7 +952,8 @@ class Handler(BaseHTTPRequestHandler):
                 tasks = [{"name": t, "licensed": t in LICENSED_TASKS,
                           "blurb": BLURB.get(t, "")}
                          for t in sorted(AVAILABLE_TASKS + LICENSED_TASKS)]
-                return self._json({"tasks": tasks, "analyses": ANALYSES})
+                return self._json({"tasks": tasks, "analyses": ANALYSES,
+                                   "license_stored": license_stored()})
             if u.path == "/api/projects":
                 return self._json({"projects": [
                     {"name": p["name"], "cases": len(p.get("cases", [])),
@@ -1005,6 +1073,10 @@ class Handler(BaseHTTPRequestHandler):
                 cleared = clear_converted(name, case)
                 return self._json({"saved": entry, "cleared_nifti": cleared})
 
+            if u.path == "/api/pick":
+                path, why = native_folder_dialog(body.get("start") or "")
+                return self._json({"path": path, "unavailable": why})
+
             if u.path == "/api/run":
                 name = self._project(body)
                 pr = load_project(name)
@@ -1014,7 +1086,7 @@ class Handler(BaseHTTPRequestHandler):
                 device = body.get("device", "gpu")
                 lic = (body.get("license") or "").strip()
                 need_lic = [t for t in tasks if t in LICENSED_TASKS]
-                if need_lic and not lic:
+                if need_lic and not lic and not license_stored():
                     return self._json({"error": "these need a license number: "
                                        + ", ".join(need_lic)}, 400)
                 ids = []

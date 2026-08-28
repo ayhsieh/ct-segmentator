@@ -56,40 +56,57 @@ def seg_dir_for(group):
     """Directory under `<group>/total_segmentor_results_<group>/` for a study group."""
     return group_dir(group) / f"total_segmentor_results_{group}"
 
-# All TotalSegmentator tasks (open license)
+# Every task TotalSegmentator accepts for -ta, split the way it splits them itself:
+# the ones below call show_license_info() in totalsegmentator/python_api.py and the
+# rest do not. Taken from the installed package's own argument choices, so this list
+# matches what will actually run rather than what the README currently advertises.
+# The two internal test models ("test", "total_highres_test") are deliberately absent.
 AVAILABLE_TASKS = [
     "total", "total_mr",
-    "lung_vessels", "lung_vessels_LEGACY",
-    "body",
+    "body", "body_mr",
+    "vertebrae_mr",
+    "lung_vessels",
+    "lung_nodules",
     "cerebral_bleed",
+    "brain_aneurysm",
+    "ventricle_parts",
     "hip_implant",
-    "coronary_arteries", "coronary_arteries_LEGACY",
     "pleural_pericard_effusion",
     "liver_vessels",
-    "oculomotor_muscles",
-    "lung_nodules",
+    "liver_segments", "liver_segments_mr",
     "kidney_cysts",
-    "brain_structures",
-    "brain_structures_mr",
-    "vertebrae_body",
-    "face",
-    "face_mr",
-    "thigh_shoulder_muscles",
+    "breasts",
+    "head_glands_cavities",
+    "head_muscles",
+    "headneck_bones_vessels",
+    "headneck_muscles",
+    "oculomotor_muscles",
+    "craniofacial_structures",
+    "teeth",
+    "abdominal_muscles",
+    "trunk_cavities",
 ]
 
 # Licensed tasks (free for non-commercial use)
 LICENSED_TASKS = [
+    "brain_structures",
+    "face", "face_mr",
+    "vertebrae_body",
     "heartchambers_highres",
+    "coronary_arteries",
+    "aortic_sinuses",
     "appendicular_bones", "appendicular_bones_mr",
-    "tissue_types",
-    "brain_aneurysm",
+    "thigh_shoulder_muscles", "thigh_shoulder_muscles_mr",
+    "tissue_types", "tissue_types_mr", "tissue_4_types",
 ]
 
 ALL_TASKS = AVAILABLE_TASKS + LICENSED_TASKS
 
 # Tasks where automatic head CT series selection applies
-BRAIN_TASKS = {"brain_structures", "brain_structures_mr", "cerebral_bleed",
-               "oculomotor_muscles", "face", "face_mr", "brain_aneurysm"}
+BRAIN_TASKS = {"brain_structures", "cerebral_bleed", "brain_aneurysm",
+               "ventricle_parts", "oculomotor_muscles", "face", "face_mr",
+               "head_glands_cavities", "head_muscles", "headneck_bones_vessels",
+               "headneck_muscles", "craniofacial_structures", "teeth"}
 
 # Tags needed for series scanning
 _SCAN_TAGS = ["SeriesInstanceUID", "SeriesNumber", "SeriesDescription"]

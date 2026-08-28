@@ -115,8 +115,9 @@ python ct_gui.py --open
 
 ### Make a project
 
-A project points at a folder of scans. Click **New project**, browse to the folder that
-holds one subfolder per patient, and click **Use this folder**.
+A project points at a folder of scans. Click **New project**, then **Choose folder…** —
+your normal Windows or Mac folder chooser opens. Pick the folder that holds one subfolder
+per patient.
 
 The tool finds the patient folders, shows them, and creates the project. Your DICOMs are
 not copied or moved — everything it generates goes into a `projects/` folder inside the
@@ -127,10 +128,14 @@ tool's own directory.
 
 ### Choose what to segment
 
-Search the list of 25 structures, tick what you want, and press **Start segmenting**.
-Some tasks are marked **licence** — those need a free academic licence number, which you
-can request [here](https://backend.totalsegmentator.com/license-academic/). Paste it into
-the box that appears.
+Search the list of 40 structure sets — every task TotalSegmentator offers — tick what you
+want, and press **Start segmenting**. Some are marked **licence**: those need a free
+academic licence number, which you can request
+[here](https://backend.totalsegmentator.com/license-academic/). Paste it into the box that
+appears. If you have entered one before, TotalSegmentator remembers it and the box does not
+appear at all.
+
+Tasks whose name ends in `_mr` are for MRI, not CT.
 
 Two extra analyses are listed below the structures: **cranial fossa volumes** and
 **brain and intracranial volume**. Both need `brain_structures` to have been run first.
