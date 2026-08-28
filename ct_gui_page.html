@@ -476,7 +476,8 @@ async function project(name) {
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
           ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
       <td class="row" style="gap:2px">
-        ${c.converted ? '<button class="quiet vsg">view segmentation</button>' : ''}
+        ${c.converted || c.tasks.length || c.fossae || c.brain_icv
+          ? '<button class="quiet vsg">view segmentation</button>' : ''}
         ${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}
         ${c.tasks.length || c.fossae || c.brain_icv
           ? '<button class="quiet sif" title="open this case\'s output folder">show in folder</button>' : ''}

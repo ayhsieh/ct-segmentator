@@ -987,8 +987,11 @@ def _ct_path(group, case):
     d = nifti_dir_for(group) / case
     hits = sorted(d.glob("*.nii.gz")) if d.is_dir() else []
     if not hits:
-        raise RuntimeError("this case has not been converted yet - run Check series "
-                           "first, or segment it, then come back")
+        raise RuntimeError(
+            "the converted CT for this case is missing, so there is nothing to draw "
+            "the segmentation on. If it has never been segmented, segment it. If it "
+            "has, the converted image was cleared - pick any task, tick 're-run even "
+            "if done', and it will be rebuilt.")
     return hits[0]                       # the same one find_source_nifti picks
 
 
