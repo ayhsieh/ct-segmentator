@@ -96,6 +96,18 @@ tr.sel td{background:var(--accentdim)}
 canvas{border:1px solid var(--line);border-radius:6px;cursor:crosshair;
   image-rendering:pixelated;max-width:100%}
 .hide{display:none}
+/* Click-to-edit text. Nothing about a line of prose says it can be clicked, so the
+   affordance has to arrive on hover: a tinted panel, an underline and a pencil. The
+   padding is cancelled by an equal negative margin and the underline is present but
+   transparent at rest, so none of it moves the text when it appears. */
+.editable{cursor:text;display:inline-block;max-width:100%;
+  padding:2px 7px;margin:-2px -7px;border-radius:6px;
+  border-bottom:1px dashed transparent;transition:background .12s,border-color .12s}
+.editable:hover,.editable:focus{background:var(--panel);border-bottom-color:var(--edge);
+  outline:none}
+.editable::after{content:"✎";font-family:var(--sans);font-size:13px;color:var(--faint);
+  margin-left:9px;opacity:0;transition:opacity .12s}
+.editable:hover::after,.editable:focus::after{opacity:1}
 .reasons{color:var(--faint);font-size:12px;font-family:var(--sans)}
 .right{margin-left:auto}
 .stack>*+*{margin-top:9px}
@@ -371,9 +383,13 @@ async function project(name) {
   let dtext = st.description || "";
   function showDesc() {
     dbox.innerHTML = "";
-    const d = $(`<div style="cursor:text${dtext ? "" : ";color:var(--faint)"}"
-      title="click to edit">${esc(dtext || "Add a description")}</div>`);
+    const d = $(`<div class="editable" tabindex="0" title="Click to edit"
+      style="${dtext ? "" : "color:var(--faint)"}"
+      >${esc(dtext || "Add a description")}</div>`);
     d.onclick = editDesc;
+    // Reachable by keyboard too, for the same reason it is reachable by mouse.
+    d.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ")
+                             { e.preventDefault(); editDesc(); } };
     dbox.append(d);
   }
   function editDesc() {
