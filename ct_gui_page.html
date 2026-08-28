@@ -154,7 +154,7 @@ function fmtTime(s) {
    project they belong to, which is where the hash still points. */
 const ROUTES = {
   home:    ()  => home(),
-  new:     ()  => newProject(),
+  new:     (a) => newProject(a[0] || ""),
   project: (a) => project(a[0]),
   fossa:   (a) => fossa(a[0], a[1]),
 };
@@ -181,7 +181,17 @@ async function home() {
       <button id="new">New project</button>
     </div>
     <div id="list"></div></div>`));
-  document.getElementById("new").onclick = () => nav("new");
+  /* Straight into the folder chooser - a screen whose only content is another button
+     is a screen nobody needs. Only what comes back gets its own screen. */
+  document.getElementById("new").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Choose a folder…");
+    try {
+      const r = await api("/api/pick", {});
+      undo();
+      if (r.unavailable) return nav("new");     /* no dialog here: browse instead */
+      if (r.path) nav("new", r.path);           /* cancelled: stay where we are */
+    } catch (e) { undo(); nav("new"); }
+  };
   const list = document.getElementById("list");
   list.append($(`<div class="meta"><span class="spin dark"></span>loading…</div>`));
   try {
@@ -207,56 +217,19 @@ function err(e) {
 }
 
 /* ------------------------------------------------------- new project */
-async function newProject() {
+async function newProject(preset) {
   stopPoll(); crumb.textContent = "New project";
   view.innerHTML = "";
   view.append($(`<div>
-    <h1>Point at your scans</h1>
+    <h1>${preset ? "Cases found" : "Point at your scans"}</h1>
     <div class="row" style="margin-bottom:8px">
-      <button id="pick">Choose folder…</button>
-      <button class="quiet" id="toggle">or browse here</button>
+      <button ${preset ? 'class="ghost"' : ''} id="pick">
+        ${preset ? "Change folder…" : "Choose folder…"}</button>
     </div>
     <div id="pickerr"></div>
-    <div id="manual" class="hide">
-      <div id="crumbs" class="row" style="margin:10px 0">   </div>
-      <div id="browser" class="card" style="max-height:330px;overflow:auto"></div>
-    </div>
     <div id="found"></div></div>`));
   let cur = null;
-  const browser = document.getElementById("browser");
-  const crumbs = document.getElementById("crumbs");
   const found = document.getElementById("found");
-
-  async function go(path) {
-    browser.innerHTML = '<div class="meta"><span class="spin dark"></span>reading…</div>';
-    found.innerHTML = "";
-    let b;
-    try { b = await api("/api/browse?path=" + encodeURIComponent(path || "")); }
-    catch (e) { browser.innerHTML = ""; browser.append(err(e)); return; }
-    cur = b.path;
-    crumbs.innerHTML = "";
-    for (const r of b.roots) {
-      const btn = $(`<button class="ghost">${esc(r.name)}</button>`);
-      btn.onclick = () => go(r.path); crumbs.append(btn);
-    }
-    if (b.parent) {
-      const up = $(`<button class="ghost">&uarr; up</button>`);
-      up.onclick = () => go(b.parent); crumbs.append(up);
-    }
-    crumbs.append($(`<span class="meta mono">${esc(b.path)}</span>`));
-    browser.innerHTML = "";
-    if (!b.dirs.length) browser.append($(`<div class="meta">no subfolders here</div>`));
-    for (const d of b.dirs) {
-      const row = $(`<div class="row" style="padding:5px 0">
-        <button class="quiet" style="text-decoration:none">${esc(d.name)}</button>
-        ${d.dicom ? '<span class="pill on">DICOM</span>' : ''}</div>`);
-      row.querySelector("button").onclick = () => go(d.path);
-      browser.append(row);
-    }
-    const use = $(`<button style="margin-top:12px">Use this folder</button>`);
-    use.onclick = () => detect(use);
-    browser.append(use);
-  }
 
   async function detect(btn) {
     const done = pending(btn, "Looking for cases…");
@@ -308,33 +281,41 @@ async function newProject() {
       };
     } catch (e) { done(); found.append(err(e)); }
   }
-  /* The real OS folder chooser, opened by the server on this same machine. A browser
-     cannot give us a folder path on its own, and typing one out is worse than either. */
-  const manual = document.getElementById("manual");
+  /* The real OS folder chooser, opened by the server on this same machine. If Tk is
+     missing there is no in-page browser to fall back to any more, so ask for the path. */
   const pickerr = document.getElementById("pickerr");
-  let browsed = false;
-  document.getElementById("toggle").onclick = () => {
-    manual.classList.toggle("hide");
-    if (!browsed) { browsed = true; go(""); }
-  };
   document.getElementById("pick").onclick = async (ev) => {
     const undo = pending(ev.currentTarget, "Choose a folder…");
     pickerr.innerHTML = "";
     try {
       const r = await api("/api/pick", {start: cur || ""});
       undo();
-      if (r.unavailable) {
-        pickerr.append($(`<div class="note amber">This computer has no folder dialog
-          (${esc(r.unavailable)}). Use <b>or browse here</b> instead.</div>`));
-        manual.classList.remove("hide"); if (!browsed) { browsed = true; go(""); }
-        return;
-      }
+      if (r.unavailable) return typePath(r.unavailable);
       if (!r.path) return;                       /* cancelled - say nothing */
-      cur = r.path;
-      pickerr.append($(`<div class="note"><span class="mono">${esc(cur)}</span></div>`));
-      detect(document.getElementById("pick"));
+      nav("new", r.path);
     } catch (e) { undo(); pickerr.append(err(e)); }
   };
+
+  function typePath(why) {
+    pickerr.innerHTML = "";
+    const box = $(`<div class="note amber">No folder dialog on this computer
+      (${esc(why)}). Paste the full path instead.
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="ppath" placeholder="C:\scans  or  /Users/you/scans"
+               style="max-width:420px">
+        <button id="usepath">Use it</button></div></div>`);
+    pickerr.append(box);
+    box.querySelector("#usepath").onclick = () => {
+      const v = box.querySelector("#ppath").value.trim();
+      if (v) nav("new", v);
+    };
+  }
+
+  if (preset) {
+    cur = preset;
+    pickerr.append($(`<div class="note"><span class="mono">${esc(cur)}</span></div>`));
+    detect(document.getElementById("pick"));
+  }
 }
 
 /* ---------------------------------------------------------- project */
@@ -395,10 +376,16 @@ async function project(name) {
       <td>${c.fossae ? '<span class="pill on">fossae</span>' : ''}
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
           ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
-      <td>${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}</td>
+      <td class="row" style="gap:2px">
+        ${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}
+        ${c.tasks.length || c.fossae || c.brain_icv
+          ? '<button class="quiet sif" title="open this case\'s output folder">show in folder</button>' : ''}
+      </td>
     </tr>`);
     const rev = tr.querySelector(".rev");
     if (rev) rev.onclick = () => nav("fossa", name, c.case);
+    const sif = tr.querySelector(".sif");
+    if (sif) sif.onclick = (ev) => reveal(name, c.case, "", null, ev.currentTarget);
     tbl.querySelector("tbody").append(tr);
   }
   cases.append(tbl);
@@ -496,8 +483,11 @@ async function project(name) {
       <div><h3>${esc(label)}</h3><div class="meta mono">${esc(file)}</div></div>
       <span class="right"></span>
       <button class="ghost bld">Build</button>
-      <button class="ghost dl">Download</button></div>
-      <div class="out"></div></div>`);
+      <button class="ghost dl">Download</button>
+      <button class="quiet sif" title="open it in Explorer/Finder">show in folder</button>
+      </div><div class="out"></div></div>`);
+    c.querySelector(".sif").onclick = (ev) =>
+      reveal(name, "", file, c.querySelector(".out"), ev.currentTarget);
     c.querySelector(".bld").onclick = async (ev) => {
       const undo = pending(ev.currentTarget, "Building…");
       const out = c.querySelector(".out"); out.innerHTML = "";
@@ -519,6 +509,17 @@ async function project(name) {
     };
     res.append(c);
   }
+}
+
+/* Ask the server to open Explorer/Finder on something it produced. The dialog and the
+   window both appear on this machine, which is the whole reason a local server can do
+   what a web page cannot. */
+async function reveal(project, cse, file, out, btn) {
+  const undo = pending(btn, "Opening…");
+  if (out) out.innerHTML = "";
+  try { await api("/api/reveal", {project, case: cse, file}); }
+  catch (e) { if (out) out.append(err(e)); else alert(e.message || e); }
+  finally { undo(); }
 }
 
 /* ------------------------------------------------------- job following */

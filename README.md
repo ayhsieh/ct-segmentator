@@ -102,8 +102,10 @@ in the dialog. After this, double-clicking works normally.
 
 ### If nothing opens
 
-The window will tell you if it cannot find the `segmentator` environment. In that case
-open a terminal, `conda activate segmentator`, `cd` to this folder, and run:
+The launcher tries the `segmentator` conda environment first, then a `.venv` folder, then
+whatever `python` is on your PATH, and uses the first one that has TotalSegmentator
+installed — conda is how the guide above sets it up, but it is not required. If none of
+them has it, the window says so. Start it by hand with any Python that does:
 
 ```bash
 python ct_gui.py --open
@@ -115,9 +117,8 @@ python ct_gui.py --open
 
 ### Make a project
 
-A project points at a folder of scans. Click **New project**, then **Choose folder…** —
-your normal Windows or Mac folder chooser opens. Pick the folder that holds one subfolder
-per patient.
+A project points at a folder of scans. Click **New project** — your normal Windows or Mac
+folder chooser opens straight away. Pick the folder that holds one subfolder per patient.
 
 The tool finds the patient folders, shows them, and creates the project. Your DICOMs are
 not copied or moved — everything it generates goes into a `projects/` folder inside the

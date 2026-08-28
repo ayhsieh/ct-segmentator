@@ -158,11 +158,35 @@ def native_folder_dialog(start=""):
     except Exception as e:
         return "", str(e)
     if r.returncode != 0:
-        # no display, or a python built without Tk - the built-in browser still works
+        # no display, or a python built without Tk - the page asks for a typed path
         tail = (r.stderr or "").strip().splitlines()
         return "", (tail[-1] if tail else "no folder dialog available here")
     p = r.stdout.strip()
     return (p if p and Path(p).is_dir() else ""), ""
+
+
+def reveal(target):
+    """Open Explorer/Finder on target, selecting it when it is a file.
+
+    Only ever called with a path this server built under projects/, and checked against
+    that again here: an "open anything on my disk" endpoint is not what this is for.
+    """
+    p = Path(target).resolve()
+    try:
+        p.relative_to(PROJECTS.resolve())
+    except ValueError:
+        raise RuntimeError("that is not inside the projects folder")
+    if not p.exists():
+        raise RuntimeError(f"nothing at {p}")
+    if WIN:
+        # explorer returns 1 even when it worked, so its exit code says nothing
+        subprocess.Popen(["explorer"] + (["/select,", str(p)] if p.is_file()
+                                         else [str(p)]))
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open"] + (["-R", str(p)] if p.is_file() else [str(p)]))
+    else:
+        subprocess.Popen(["xdg-open", str(p if p.is_dir() else p.parent)])
+    return str(p)
 
 
 # The two derived analyses in this repo, which are not TotalSegmentator tasks
@@ -850,40 +874,6 @@ def job_fossa_apply(project, case, edits):
                [("saving the trace", write), (f"{case} - refit", argv)])
 
 
-# ---------------------------------------------------------------------- browsing
-def roots():
-    out = [{"name": "Home", "path": str(Path.home())}]
-    if WIN:
-        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-            p = Path(f"{letter}:\\")
-            if p.exists():
-                out.append({"name": f"{letter}:", "path": str(p)})
-    else:
-        out.append({"name": "/", "path": "/"})
-    out.append({"name": "Sample scans", "path": str(APP / "ct_scans")})
-    return [r for r in out if Path(r["path"]).exists()]
-
-
-def browse(path):
-    p = Path(path) if path else Path.home()
-    if not p.is_dir():
-        raise RuntimeError(f"not a folder: {p}")
-    dirs = []
-    try:
-        for d in sorted(p.iterdir()):
-            if not d.is_dir() or d.name.startswith("."):
-                continue
-            dirs.append({"name": d.name, "path": str(d),
-                         "dicom": has_dicom_anywhere(d, budget=120)})
-            if len(dirs) >= 400:
-                break
-    except (PermissionError, OSError) as e:
-        raise RuntimeError(f"{type(e).__name__}: {e}")
-    zips = sorted(f.name for f in p.glob("*.zip"))
-    return {"path": str(p), "parent": str(p.parent) if p.parent != p else None,
-            "roots": roots(), "dirs": dirs, "zips": zips}
-
-
 # ------------------------------------------------------------------------ server
 class Handler(BaseHTTPRequestHandler):
     server_version = "ct-gui"
@@ -912,9 +902,9 @@ class Handler(BaseHTTPRequestHandler):
     def _guard(self, q):
         """A token on every API call, and a Host check.
 
-        Any web page the user has open can POST to 127.0.0.1, and this server exposes a
-        filesystem browser and a job launcher - fossa_review.py only served precomputed
-        images and did not need this.
+        Any web page the user has open can POST to 127.0.0.1, and this server opens
+        file dialogs and launches jobs - fossa_review.py only served precomputed images
+        and did not need this.
         """
         host = (self.headers.get("Host") or "").split(":")[0]
         if host not in ("127.0.0.1", "localhost", "[::1]", ""):
@@ -961,8 +951,6 @@ class Handler(BaseHTTPRequestHandler):
                      "created": p.get("created", "")} for p in list_projects()]})
             if u.path == "/api/project":
                 return self._json(project_state(self._project(q)))
-            if u.path == "/api/browse":
-                return self._json(browse(q.get("path")))
             if u.path == "/api/detect":
                 cases, err = detect_cases(q.get("path", ""))
                 return self._json({"cases": cases, "error": err,
@@ -1076,6 +1064,13 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/pick":
                 path, why = native_folder_dialog(body.get("start") or "")
                 return self._json({"path": path, "unavailable": why})
+
+            if u.path == "/api/reveal":
+                name = self._project(body)
+                base = seg_dir_for(name)
+                case, f = body.get("case") or "", body.get("file") or ""
+                target = base / case / f if case else base / f
+                return self._json({"opened": reveal(target)})
 
             if u.path == "/api/run":
                 name = self._project(body)
