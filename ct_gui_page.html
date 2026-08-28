@@ -889,7 +889,15 @@ async function fossa(name, cse) {
     <div class="row"><button id="apply">Apply and recompute</button>
       <button class="ghost" id="drop">Drop corrections</button>
       <button class="quiet" id="back">Back</button></div>
-    <div id="fout"></div></div>`));
+    <div id="fout"></div>
+    <h2>Result</h2>
+    <div class="meta" style="margin-bottom:8px">The floor map with the fitted
+      boundaries, and the sagittal slice as 3D Slicer would show it. This is what the
+      pitch and roll above change — check the walls against the bone here.</div>
+    <img id="result" style="max-width:100%;border:1px solid var(--line);
+      border-radius:8px;background:var(--surface)">
+    <div id="rout"></div>
+    </div>`));
   document.getElementById("back").onclick = () => nav("project", name);
 
   const cv = document.getElementById("cv"), cx = cv.getContext("2d");
@@ -904,10 +912,29 @@ async function fossa(name, cse) {
     document.getElementById("pitch").value = ST.edits.up_adjust[0];
     document.getElementById("roll").value = ST.edits.up_adjust[1];
   }
-  document.getElementById("axis").textContent = ST.stats.up_axis
-    ? `${ST.stats.up_axis} — ${ST.stats.up_tilt_vs_scanner_deg}` +
-      "° off the scanner vertical" : "";
+  function axisLine() {
+    document.getElementById("axis").textContent = ST.stats.up_axis
+      ? `${ST.stats.up_axis} — ${ST.stats.up_tilt_vs_scanner_deg}` +
+        "° off the scanner vertical" : "";
+  }
+  axisLine();
   vols();
+
+  const result = document.getElementById("result");
+  function showResult() {
+    result.style.display = "";
+    document.getElementById("rout").innerHTML = "";
+    result.src = "/api/fossa/map.png?name=" + encodeURIComponent(name) +
+                 "&case=" + encodeURIComponent(cse) +
+                 "&token=" + encodeURIComponent(TOKEN) + "&t=" + Date.now();
+  }
+  result.onerror = () => {
+    result.style.display = "none";
+    document.getElementById("rout").append($(`<div class="note">No result picture for
+      this case yet — apply a correction, or re-run the fossa analysis, to draw
+      one.</div>`));
+  };
+  showResult();
 
   img.onload = draw;
   img.src = "/api/fossa/floor.png?name=" + encodeURIComponent(name) +
@@ -979,10 +1006,11 @@ async function fossa(name, cse) {
       });
       ST = await api("/api/fossa/case?name=" + encodeURIComponent(name) +
                      "&case=" + encodeURIComponent(cse));
-      vols();
+      vols(); axisLine();
       img.src = "/api/fossa/floor.png?name=" + encodeURIComponent(name) +
                 "&case=" + encodeURIComponent(cse) +
                 "&token=" + encodeURIComponent(TOKEN) + "&t=" + Date.now();
+      showResult();
       out.append($(`<div class="note">Recomputed.</div>`));
     } catch (e) { out.append(err(e)); } finally { undo(); }
   }
