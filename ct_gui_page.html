@@ -499,7 +499,7 @@ async function project(name) {
   };
 
   document.getElementById("run").onclick = async (ev) => {
-    const btn = ev.currentTarget, undo = pending(btn, "Queued…");
+    const btn = ev.currentTarget, undo = pending(btn, "Checking series…");
     const box = document.getElementById("runerr"); box.innerHTML = "";
     const cs = [...document.querySelectorAll(".ck:checked")].map(i => i.value);
     const tasks = [...document.querySelectorAll(".task:checked")].map(i => i.value);
@@ -507,10 +507,22 @@ async function project(name) {
     if (!cs.length) { undo(); box.append(err({message:"Tick at least one case."})); return; }
     if (!tasks.length && !anal.length) {
       undo(); box.append(err({message:"Tick at least one structure or analysis."})); return; }
+    const plan = {project:name, cases:cs, tasks, analyses:anal,
+      force: document.getElementById("force").checked,
+      license: (document.getElementById("licno")||{}).value || ""};
     try {
-      const r = await api("/api/run", {project:name, cases:cs, tasks, analyses:anal,
-        force: document.getElementById("force").checked,
-        license: (document.getElementById("licno")||{}).value || ""});
+      /* Resolve the series before anything is queued. The pipeline asks on the command
+         line when it cannot decide, and the GUI runs it with stdin closed, so an
+         unresolved case would be skipped silently and look like a run that worked. */
+      if (tasks.length) {
+        const {job} = await api("/api/scan", {project:name, cases:cs});
+        const res = await scanResults(job);
+        const need = Object.entries(res)
+          .filter(([, r]) => r.error || r.decision === "manual" || r.decision === "none")
+          .map(([c]) => c);
+        if (need.length) { undo(); return series(name, job, plan, need); }
+      }
+      const r = await api("/api/run", plan);
       running(name, r.jobs);
     } catch (e) { undo(); box.append(err(e)); }
   };
@@ -639,18 +651,50 @@ function running(name, jobs) {
   })();
 }
 
+/* Wait for a scan job and hand back its per-case results. */
+async function scanResults(job) {
+  let out = {};
+  await follow(job, (s) => { if (s.results) out = s.results; });
+  return out;
+}
+
 /* ------------------------------------------------------ series screen */
-async function series(name, job) {
+/* `plan` is set when we got here on the way to segmenting: the run is held until every
+   case has a series, then continues by itself. `need` names the cases that blocked it. */
+async function series(name, job, plan, need) {
   stopPoll(); crumb.textContent = name + " · series";
   view.innerHTML = "";
   view.append($(`<div>
     <h1>Which series?</h1>
+    ${plan ? `<div class="note amber">${need.length} case(s) have more than one
+      plausible series, so segmenting is on hold until you choose:
+      <b>${esc(need.join(", "))}</b>.</div>` : ""}
     <div id="cs"></div>
     <div class="row" style="margin-top:16px">
-      <button id="doneb">Back to project</button></div></div>`));
+      ${plan ? '<button id="go" disabled>Choose a series for each case first</button>' : ""}
+      <button class="${plan ? "quiet" : ""}" id="doneb">Back to project</button>
+      </div></div>`));
   document.getElementById("doneb").onclick = () => nav("project", name);
   const cs = document.getElementById("cs");
   cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
+
+  const unresolved = new Set(need || []);
+  function retest() {
+    const go = document.getElementById("go");
+    if (!go) return;
+    go.disabled = unresolved.size > 0;
+    go.textContent = unresolved.size
+      ? `${unresolved.size} case(s) still need a series`
+      : "Start segmenting";
+  }
+  const go = document.getElementById("go");
+  if (go) go.onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Queued…");
+    try {
+      const r = await api("/api/run", plan);
+      running(name, r.jobs);
+    } catch (e) { undo(); cs.append(err(e)); }
+  };
 
   await follow(job, (s) => {
     if (!s.results) return;
@@ -658,6 +702,7 @@ async function series(name, job) {
     for (const [cse, r] of Object.entries(s.results)) render(cse, r);
     if (s.state === "running")
       cs.append($(`<div class="meta"><span class="spin dark"></span>still reading…</div>`));
+    retest();
   });
 
   function render(cse, r) {
@@ -695,6 +740,7 @@ async function series(name, job) {
           tr.classList.add("sel");
           card.querySelector(".pill").outerHTML =
             '<span class="pill on">chosen by you</span>';
+          unresolved.delete(cse); retest();
           if (res.cleared_nifti)
             card.append($(`<div class="note amber">Removed the old converted image so
               this new choice takes effect.</div>`));

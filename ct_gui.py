@@ -529,14 +529,24 @@ def run_step(job, caption, argv):
         popen["start_new_session"] = True
     proc = subprocess.Popen(argv, **popen)
     job.proc = proc
+    skipped = False
     for line in proc.stdout:
         job.emit(line)
+        # segment_structures exits 0 after skipping a folder it could not resolve a
+        # series for, which would otherwise read as a successful run that produced
+        # nothing. The UI resolves series before running, so reaching this means the
+        # cache changed underneath us - loud is right.
+        if "requiring manual selection" in line:
+            skipped = True
         if job.cancelled:
             break
     if job.cancelled:
         tree_kill(proc)
     proc.wait()
     job.proc = None
+    if skipped and proc.returncode == 0:
+        job.emit("!! skipped: no series chosen for this case - use Check series first")
+        return 65
     return proc.returncode
 
 
