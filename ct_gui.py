@@ -78,12 +78,12 @@ BLURB = {
     "vertebrae_mr": "individual vertebrae C1-L5 and the sacrum, for MR",
     "lung_vessels": "pulmonary arteries, veins, airways and airway walls",
     "lung_nodules": "lung nodules",
-    "cerebral_bleed": "intracerebral haemorrhage",
+    "cerebral_bleed": "intracerebral hemorrhage",
     "brain_aneurysm": "intracranial aneurysms - TOF MR only, not CT",
     "ventricle_parts": "the ventricles split into their parts",
     "hip_implant": "hip prostheses",
     "pleural_pericard_effusion": "pleural and pericardial effusion",
-    "liver_vessels": "hepatic vessels and tumours",
+    "liver_vessels": "hepatic vessels and tumors",
     "liver_segments": "the Couinaud liver segments",
     "liver_segments_mr": "the Couinaud liver segments, for MR",
     "kidney_cysts": "renal cysts",
@@ -98,7 +98,7 @@ BLURB = {
     "abdominal_muscles": "the core and torso muscles",
     "trunk_cavities": "the abdominal and thoracic cavities, and the mediastinum",
     "brain_structures": "brain regions: lobes, cerebellum, brainstem, ventricles, CSF",
-    "face": "the face, for defacing/anonymising",
+    "face": "the face, for defacing/anonymizing",
     "face_mr": "the face, for MR",
     "vertebrae_body": "vertebral bodies without the posterior elements",
     "heartchambers_highres": "the four heart chambers at high resolution",
@@ -113,9 +113,9 @@ BLURB = {
     "tissue_4_types": "the tissue types plus intermuscular fat",
 }
 
-# Whether TotalSegmentator already holds a valid licence. Asked once, in a subprocess,
+# Whether TotalSegmentator already holds a valid license. Asked once, in a subprocess,
 # so the answer costs nothing at startup and torch never loads into the server. When a
-# licence is already stored the UI stops demanding a number for the licensed tasks -
+# license is already stored the UI stops demanding a number for the licensed tasks -
 # they will simply run, exactly as they do from the command line.
 _LICENSE_STATE = None
 
@@ -757,7 +757,7 @@ def write_pick(link_path, series_dir, snum, desc):
     Keyed by the resolved path because Path.resolve() follows a junction, which is what
     plan_all_folders does when it builds folder_key - so the entry must live under the
     source path. The junction path is written too, which costs nothing and survives if
-    that behaviour ever changes. series_dir is stored absolute; many existing entries
+    that behavior ever changes. series_dir is stored absolute; many existing entries
     are relative and only resolve when the cwd happens to be the repo root.
     """
     from segment_structures import load_cache, save_cache
@@ -826,7 +826,7 @@ def fossa_floor_png(group, case):
     """The floor map alone, one pixel per cell.
 
     imsave rather than a figure so pixel column i IS lane i - that exactness is what
-    lets a click in the browser convert straight back to millimetres. vmin/vmax must be
+    lets a click in the browser convert straight back to millimeters. vmin/vmax must be
     passed explicitly: cells outside the footprint are NaN, and left to work the range
     out for itself imsave masks everything and returns a blank transparent PNG with no
     error at all.

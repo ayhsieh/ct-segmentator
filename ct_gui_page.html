@@ -411,7 +411,7 @@ async function project(name) {
       tl.append($(`<label>
         <input type="checkbox" class="task" value="${esc(task.name)}">
         <span><span class="tname">${esc(task.name)}</span>
-          ${task.licensed ? '<span class="pill amber">licence</span>' : ''}
+          ${task.licensed ? '<span class="pill amber">license</span>' : ''}
           ${doneTasks.has(task.name) ? '<span class="pill on">done</span>' : ''}
           <div class="tblurb">${esc(task.blurb || "")}</div></span></label>`));
     }
@@ -434,17 +434,17 @@ async function project(name) {
     const box = document.getElementById("lic");
     box.innerHTML = "";
     if (!need.length) return;
-    /* TotalSegmentator stores a licence once and reuses it, so when one is already
+    /* TotalSegmentator stores a license once and reuses it, so when one is already
        registered on this machine there is nothing to ask for. */
     if (t.license_stored) {
       box.append($(`<div class="note">
-        <b>${esc(need.join(", "))}</b> need a licence &mdash; one is already registered
+        <b>${esc(need.join(", "))}</b> need a license &mdash; one is already registered
         on this computer, so they will just run.</div>`));
       return;
     }
     box.append($(`<div class="note amber">
-      <b>${esc(need.join(", "))}</b> need a free non-commercial licence number.
-      <input type="text" id="licno" placeholder="licence number"
+      <b>${esc(need.join(", "))}</b> need a free non-commercial license number.
+      <input type="text" id="licno" placeholder="license number"
              style="max-width:260px;margin-top:8px"></div>`));
   }
 
@@ -709,8 +709,8 @@ async function fossa(name, cse) {
   const x2mm = (x) => ST.lanes[0] + x / cv.width * (ST.lanes.at(-1) - ST.lanes[0]);
   const y2mm = (y) => ST.fmax - y / cv.height * (ST.fmax - ST.f0);
 
-  function poly(v, colour, dash) {
-    cx.beginPath(); cx.strokeStyle = colour; cx.lineWidth = 2;
+  function poly(v, color, dash) {
+    cx.beginPath(); cx.strokeStyle = color; cx.lineWidth = 2;
     cx.setLineDash(dash ? [6,4] : []);
     ST.lanes.forEach((l,i) => { const x = mm2x(l), y = mm2y(v[i]);
       i ? cx.lineTo(x,y) : cx.moveTo(x,y); });
@@ -720,12 +720,12 @@ async function fossa(name, cse) {
     cx.clearRect(0,0,cv.width,cv.height);
     cx.drawImage(img, 0, 0, cv.width, cv.height);
     poly(ST.ant, "magenta", true); poly(ST.post, "cyan", true);
-    for (const [k,colour] of [["ant","magenta"],["post","cyan"]]) {
+    for (const [k,color] of [["ant","magenta"],["post","cyan"]]) {
       if (!pts[k].length) continue;
-      cx.beginPath(); cx.strokeStyle = colour; cx.lineWidth = 3;
+      cx.beginPath(); cx.strokeStyle = color; cx.lineWidth = 3;
       pts[k].forEach((p,i) => { const x = mm2x(p[0]), y = mm2y(p[1]);
         i ? cx.lineTo(x,y) : cx.moveTo(x,y); });
-      cx.stroke(); cx.fillStyle = colour;
+      cx.stroke(); cx.fillStyle = color;
       pts[k].forEach(p => { cx.beginPath();
         cx.arc(mm2x(p[0]), mm2y(p[1]), 4, 0, 7); cx.fill(); });
     }

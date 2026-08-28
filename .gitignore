@@ -24,3 +24,4 @@ __pycache__/
 # the GUI's own folder: links into patient data plus everything it generates
 /projects/
 ct_gui.log
+miniconda/
