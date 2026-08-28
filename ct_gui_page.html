@@ -209,7 +209,7 @@ const ROUTES = {
   new:     (a) => newProject(a[0] || ""),
   project: (a) => project(a[0]),
   fossa:   (a) => fossa(a[0], a[1]),
-  viewseg: (a) => viewseg(a[0], a[1]),
+  viewseg: (a) => viewseg(a[0], a[1], a[2]),
 };
 function nav(v, ...args) {
   const h = "#" + [v].concat(args.map(encodeURIComponent)).join("/");
@@ -888,6 +888,7 @@ async function fossa(name, cse) {
     </fieldset>
     <div class="row"><button id="apply">Apply and recompute</button>
       <button class="ghost" id="drop">Drop corrections</button>
+      <button class="ghost" id="see">View in 2D/3D</button>
       <button class="quiet" id="back">Back</button></div>
     <div id="fout"></div>
     <h2>Result</h2>
@@ -899,6 +900,8 @@ async function fossa(name, cse) {
     <div id="rout"></div>
     </div>`));
   document.getElementById("back").onclick = () => nav("project", name);
+  document.getElementById("see").onclick =
+    () => nav("viewseg", name, cse, "fossae_simple");
 
   const cv = document.getElementById("cv"), cx = cv.getContext("2d");
   let ST = null, mode = "post", pts = {ant:[], post:[]};
@@ -1364,7 +1367,7 @@ function makeViewer3D(canvas) {
    a slider and a list - no canvas and no 3D library. Two things make it feel
    immediate: one request in flight at a time with latest-wins coalescing, and
    swapping in an Image() that has already decoded rather than setting src directly. */
-async function viewseg(name, cse) {
+async function viewseg(name, cse, focus) {
   stopPoll();
   crumb.textContent = name + " · " + cse;
   view.innerHTML = "";
@@ -1437,8 +1440,10 @@ async function viewseg(name, cse) {
   };
 
   /* Open with the most specific group lit - it is last in the paint order - so the
-     first frame shows something without being 117 structures of mush. */
-  const last = st.layers[st.layers.length - 1];
+     first frame shows something without being 117 structures of mush. Arriving from a
+     screen that is about one particular layer lights that one instead. */
+  const last = (focus && st.layers.find(L => L.task === focus))
+            || st.layers[st.layers.length - 1];
   if (last && last.segments.length <= 40) last.segments.forEach(s => setOn(last.task, s.i, true));
 
   /* ---- sidebar, built once and never rebuilt. Toggling flips a class and a byte, so
