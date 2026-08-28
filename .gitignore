@@ -25,3 +25,4 @@ __pycache__/
 /projects/
 ct_gui.log
 miniconda/
+miniconda-installer.sh

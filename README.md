@@ -11,31 +11,70 @@ are read where they are; nothing is uploaded or copied.
 
 ## Setup
 
-Download this repository (green **Code** button → **Download ZIP**) and unzip it into
-your Documents folder.
+### Getting the files
+
+The green **Code** button → **Download ZIP**, unzipped into your Documents folder,
+works. But a ZIP is a frozen copy: every time this tool is fixed or improved you have
+to download and unzip the whole thing again. Cloning it with Git instead makes updating
+one command, and is worth the five minutes now.
+
+**1. Install Git.**
+
+- **Mac** — open Terminal (Command-Space, type `Terminal`, Return), paste
+  `xcode-select --install`, press Return, click **Install**. If it says it is already
+  installed, you are done.
+- **Windows** — download from [git-scm.com/downloads](https://git-scm.com/downloads),
+  open the installer, and click **Next** on every screen. The defaults are correct.
+
+**2. Download the tool.** Open Terminal (Mac) or Command Prompt (Windows: press the
+Start key, type `cmd`, Return) and paste these two lines, pressing Return after each:
+
+```bash
+cd Documents
+git clone https://github.com/ayhsieh/ct-segmentator.git
+```
+
+That makes a `ct-segmentator` folder in Documents. Carry on below.
+
+**Later, to get updates** — open Terminal or Command Prompt again and paste:
+
+```bash
+cd Documents/ct-segmentator
+git pull
+```
+
+Your projects, scans and results are untouched by this; only the tool's own files
+change.
 
 ### Mac
 
-macOS won't run downloaded scripts until you allow them. Right-click the unzipped
-**folder**, hold **Option**, choose **Copy "ct-segmentator" as Pathname**. Open Terminal
-(Command-Space, type Terminal), type `chmod +x ` with a space, paste, add `/*.command`,
-press Return:
+macOS won't run downloaded scripts until you allow them. In Terminal, paste:
 
 ```bash
-chmod +x /Users/you/Documents/ct-segmentator/*.command
+chmod +x ~/Documents/ct-segmentator/*.command
 ```
 
+If the folder is somewhere other than Documents, right-click it, hold **Option**, choose
+**Copy "ct-segmentator" as Pathname**, and paste that in place of the path above.
+
 Double-click **`install.command`**. macOS will call it an unidentified developer the
-first time — right-click it, **Open**, **Open** again. It downloads Python and the
-segmentation packages into the folder: 10–30 minutes, a few gigabytes. Do the same
-right-click-Open once for **`start.command`**.
+first time — right-click it, **Open**, **Open** again. It first checks whether this
+computer already has a Python with the packages — an existing conda environment, a
+virtualenv, 3D Slicer's — and if it finds one, it stops there with nothing to install.
+If it finds one that is close (TotalSegmentator already there, a couple of small
+packages missing) it offers to add just those, which takes about a minute. Only when
+there is nothing to build on does it download its own Python and everything else into
+the folder: 10–30 minutes, a few gigabytes. Do the same right-click-Open once for
+**`start.command`**.
 
 From then on, double-click **`start.command`** to use the tool. Leave its window open;
 closing it stops the tool.
 
 ### Windows
 
-Double-click **`start.bat`**. If it says nothing is installed, install
+Double-click **`start.bat`**. It looks for a Python with the packages in the usual
+Anaconda, Miniconda, miniforge, virtualenv and 3D Slicer locations, and if it finds one
+that only lacks a package or two it offers to add them. If it finds nothing, install
 [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install/windows-gui-install),
 open **Anaconda Prompt**, and run:
 
@@ -45,12 +84,16 @@ conda activate segmentator
 pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd totalsegmentator torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-Drop `--index-url ...` if you have no NVIDIA graphics card.
+Drop `--index-url ...` if you have no NVIDIA graphics card. Then double-click
+**`start.bat`** again — it finds that environment on its own, whatever it is called and
+wherever conda put it.
 
 ### If nothing opens
 
-The launcher uses the first Python it finds with all the packages, and says so if there
-is none. Any Python that has them works:
+The launchers search for a Python that can import everything the pipeline needs, not
+just TotalSegmentator — 3D Slicer's bundled Python has TotalSegmentator but no
+`dicom2nifti` or `pynrrd`, and would fail mid-run. They name the Python they picked, or
+the one they found that was closest. Any Python with the full set works directly:
 
 ```bash
 python ct_gui.py --open

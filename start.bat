@@ -1,59 +1,67 @@
 @echo off
-rem Double-click this to open the segmentation interface.
+rem Double-click this to open the segmentation interface. If this computer already has
+rem a Python with the segmentation packages it uses that; if one is close, it offers to
+rem add the few packages it lacks.
 cd /d "%~dp0"
+setlocal
 
-rem Nothing here requires conda - any python with the packages will do. Try the conda
-rem env first, then a local venv, then 3D Slicer's bundled python, then PATH.
-rem "conda activate" is not used: it fails silently inside a double-clicked batch file
-rem and then runs the wrong python. Each candidate is tested against the whole set the
-rem pipeline imports, not just totalsegmentator - Slicer ships TotalSegmentator but not
-rem dicom2nifti or pynrrd, so a narrower test would pick a python that fails later.
-setlocal enabledelayedexpansion
-set PY=
-set NEEDS=import totalsegmentator,pydicom,dicom2nifti,nibabel,scipy,matplotlib,pandas,nrrd
+echo   Looking for the Python this tool needs...
+call "%~dp0find_python.bat"
 
-for %%P in (
-  "miniconda\python.exe"
-  "%USERPROFILE%\anaconda3\envs\segmentator\python.exe"
-  "%USERPROFILE%\miniconda3\envs\segmentator\python.exe"
-  "%LOCALAPPDATA%\anaconda3\envs\segmentator\python.exe"
-  "%LOCALAPPDATA%\miniconda3\envs\segmentator\python.exe"
-  "C:\ProgramData\anaconda3\envs\segmentator\python.exe"
-  "C:\ProgramData\miniconda3\envs\segmentator\python.exe"
-  ".venv\Scripts\python.exe"
-) do if not defined PY if exist %%P (
-  %%P -c "!NEEDS!" >nul 2>&1 && set PY=%%P
-)
+if defined FOUND_PY goto :run
 
-for /d %%D in ("%LOCALAPPDATA%\slicer.org\Slicer *") do if not defined PY (
-  if exist "%%D\bin\PythonSlicer.exe" (
-    "%%D\bin\PythonSlicer.exe" -c "!NEEDS!" >nul 2>&1 && set PY="%%D\bin\PythonSlicer.exe"
-  )
-)
+rem An environment that already has TotalSegmentator is missing only small packages -
+rem seconds of download, against a fresh multi-gigabyte install of everything. Offered
+rem rather than done, because it writes into an environment used for other work.
+if not defined PARTIAL_PY goto :nothing
 
-if not defined PY (
-  for /f "delims=" %%W in ('where python 2^>nul') do if not defined PY (
-    "%%W" -c "!NEEDS!" >nul 2>&1 && set PY="%%W"
-  )
-)
+rem pip names differ from import names in one place, so the missing module list cannot
+rem simply be handed to pip.
+set "ADD=%PARTIAL_MISSING:nrrd=pynrrd%"
 
-if not defined PY (
+echo.
+echo   This computer already has most of what is needed:
+echo     %PARTIAL_PY%
+echo   It only needs: %ADD%
+echo.
+echo   Adding those takes about a minute.
+echo.
+set "ANSWER="
+set /p "ANSWER=  Add the missing packages to that Python? [Y/n] "
+if /i "%ANSWER%"=="n" goto :nothing
+if /i "%ANSWER%"=="no" goto :nothing
+
+echo.
+echo   Installing: %ADD%
+"%PARTIAL_PY%" -m pip install %ADD%
+if errorlevel 1 (
   echo.
-  echo   Could not find a Python with the required packages.
-  echo.
-  echo   Open Anaconda Prompt and run:
-  echo       conda activate segmentator
-  echo       cd /d "%~dp0"
-  echo       python ct_gui.py --open
-  echo.
-  echo   If you have not installed it yet, see the README - step 2.
+  echo   Those packages would not install. Nothing else was changed.
   echo.
   pause
   exit /b 1
 )
+set "FOUND_PY=%PARTIAL_PY%"
 
-echo Starting the interface... a browser window will open.
-%PY% ct_gui.py --open
+:run
+echo   Using: %FOUND_PY%
+echo   Starting the interface... a browser window will open.
+"%FOUND_PY%" ct_gui.py --open
 echo.
 echo The server has stopped.
 pause
+exit /b 0
+
+:nothing
+echo.
+echo   Could not find a Python with the required packages.
+echo.
+echo   Open Anaconda Prompt and run:
+echo       conda create -n segmentator python=3.10
+echo       conda activate segmentator
+echo       pip install pydicom dicom2nifti nibabel numpy scipy matplotlib pandas pynrrd totalsegmentator torch torchvision torchaudio
+echo.
+echo   Then double-click this file again - it will find that environment on its own.
+echo.
+pause
+exit /b 1
