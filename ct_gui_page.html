@@ -861,7 +861,9 @@ async function series(name, job, plan, cases) {
     for (const s of r.series) {
       const chosen = r.chosen && String(r.chosen.snum) === String(s.snum);
       const tr = $(`<tr class="${chosen ? "sel" : ""}">
-        <td><button class="quiet pick">use</button></td>
+        <td class="row" style="gap:2px">
+          <button class="quiet pick">use</button>
+          <button class="quiet look">view</button></td>
         <td>${esc(s.snum)}</td><td>${s.slices}</td>
         <td>${s.thickness == null ? "?" : esc(s.thickness) + "mm"}</td>
         <td class="mono">${esc(s.kernel || "?")}</td>
@@ -885,9 +887,72 @@ async function series(name, job, plan, cases) {
               this new choice takes effect.</div>`));
         } catch (e) { card.append(err(e)); } finally { undo(); }
       };
+      tr.querySelector(".look").onclick = () => preview(card, cse, s);
       tb.append(tr);
     }
     return card;
+  }
+
+  /* Read straight off the DICOMs. Choosing a series is a question about what the
+     images look like, asked before anything has been converted, so looking cannot
+     require a conversion or write anything down. */
+  function preview(card, cse, row) {
+    let box = card.querySelector(".prev");
+    if (box && box.dataset.snum === String(row.snum)) { box.remove(); return; }
+    if (box) box.remove();
+    box = $(`<div class="prev" style="margin-top:12px">
+      <div class="row" style="margin-bottom:6px">
+        <b class="ui">series ${esc(row.snum)}</b>
+        <span class="meta">${esc(row.desc || "(no description)")}</span>
+        <span class="right row" style="gap:4px" id="pw"></span></div>
+      <img class="pimg" style="max-width:100%;border:1px solid var(--line);
+        border-radius:6px;background:#000;image-rendering:pixelated">
+      <input type="range" class="psl" style="width:100%;margin:8px 0 2px"
+             min="0" max="0" value="0">
+      <div class="meta mono plab"></div></div>`);
+    box.dataset.snum = String(row.snum);
+    card.append(box);
+
+    const im = box.querySelector(".pimg"), sl = box.querySelector(".psl");
+    const lab = box.querySelector(".plab");
+    let ww = 2500, wl = 480, want = 0, busy = false;
+    const base = "/api/series/preview.png?name=" + encodeURIComponent(name) +
+                 "&case=" + encodeURIComponent(cse) +
+                 "&path=" + encodeURIComponent(row.series_dir) +
+                 "&token=" + encodeURIComponent(TOKEN);
+
+    /* One request in flight, latest wins - scrubbing then self-paces instead of
+       queueing a frame per pixel of slider travel. */
+    function show() {
+      if (busy) return;
+      busy = true;
+      const i = want, next = new Image();
+      next.onload = () => {
+        im.src = next.src; busy = false;
+        lab.textContent = `slice ${i + 1} / ${+sl.max + 1} · W ${ww} L ${wl}`;
+        if (want !== i) show();
+      };
+      next.onerror = () => { busy = false; lab.textContent = "could not read that slice"; };
+      next.src = `${base}&i=${i}&ww=${ww}&wl=${wl}`;
+    }
+    sl.oninput = () => { want = +sl.value; show(); };
+
+    for (const [nm, v] of Object.entries({bone: [2500, 480], "soft tissue": [400, 50],
+                                          brain: [80, 40]})) {
+      const b = $(`<button class="quiet">${esc(nm)}</button>`);
+      b.onclick = () => { ww = v[0]; wl = v[1]; show(); };
+      box.querySelector("#pw").append(b);
+    }
+
+    api("/api/series/info?name=" + encodeURIComponent(name) +
+        "&case=" + encodeURIComponent(cse) +
+        "&path=" + encodeURIComponent(row.series_dir))
+      .then(info => {
+        sl.max = Math.max(0, info.slices - 1);
+        sl.value = want = Math.floor(info.slices / 2);
+        show();
+      })
+      .catch(e => box.append(err(e)));
   }
 }
 

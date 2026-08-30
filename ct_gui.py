@@ -1385,6 +1385,87 @@ def view_slice_png(group, case, plane, i, ww, wl, op, vis):
     return buf.getvalue()
 
 
+# ------------------------------------------------------- previewing a raw series
+# The series screen asks which reconstruction to segment, and the honest way to answer
+# is to look at one. These read the DICOMs straight from the folder - no conversion, no
+# NIfTI written, nothing recorded - because the question is being asked before any of
+# that has happened, and looking must not commit you to anything.
+_SERIES_CACHE = {}
+_SERIES_CACHE_MAX = 8
+
+
+def _series_files(series_dir):
+    """The slices of one series, ordered the way they stack."""
+    import pydicom
+    d = Path(series_dir)
+    if not d.is_dir():
+        raise RuntimeError("that series folder is not there")
+    key = (str(d.resolve()), int(d.stat().st_mtime))
+    hit = _SERIES_CACHE.get(key)
+    if hit:
+        return hit
+    rows = []
+    for f in sorted(d.iterdir()):
+        if not f.is_file():
+            continue
+        try:
+            ds = pydicom.dcmread(str(f), stop_before_pixels=True, force=True)
+        except Exception:
+            continue
+        # PixelData is deliberately not read here, so it cannot be tested for; Rows
+        # is what says this is an image rather than a DICOMDIR or a report
+        if not hasattr(ds, "SOPInstanceUID") or not hasattr(ds, "Rows"):
+            continue
+        # ImagePositionPatient sorts a tilted or interleaved stack correctly where
+        # InstanceNumber only sorts what the scanner happened to number in order.
+        try:
+            z = float(ds.ImagePositionPatient[2])
+        except Exception:
+            z = float(getattr(ds, "InstanceNumber", 0) or 0)
+        rows.append((z, str(f)))
+    if not rows:
+        raise RuntimeError("no readable images in that folder")
+    rows.sort()
+    out = [f for _, f in rows]
+    if len(_SERIES_CACHE) >= _SERIES_CACHE_MAX:
+        _SERIES_CACHE.pop(next(iter(_SERIES_CACHE)))
+    _SERIES_CACHE[key] = out
+    return out
+
+
+def series_under_case(project, case, series_dir):
+    """The series folder, checked to be inside that case. A path from a query string is
+    not a permission: without this the route would render any DICOM on the disk."""
+    link = (PROJECTS / project / case).resolve()
+    d = Path(series_dir).resolve()
+    if d != link and link not in d.parents:
+        raise RuntimeError("that folder is not part of this case")
+    return d
+
+
+def series_preview_png(series_dir, i, ww, wl):
+    """One slice of a raw DICOM series, windowed, as PNG bytes."""
+    import io
+    import numpy as np
+    import pydicom
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    files = _series_files(series_dir)
+    i = max(0, min(len(files) - 1, int(i)))
+    ds = pydicom.dcmread(files[i], force=True)
+    arr = ds.pixel_array.astype(np.float32)
+    # raw stored values are not Hounsfield units until the rescale is applied, and a
+    # bone window over unrescaled values comes out solid white
+    arr = arr * float(getattr(ds, "RescaleSlope", 1) or 1) +         float(getattr(ds, "RescaleIntercept", 0) or 0)
+    ww = max(1.0, float(ww))
+    lo = float(wl) - ww / 2.0
+    g = np.clip((arr - lo) * (255.0 / ww), 0, 255).astype(np.uint8)
+    buf = io.BytesIO()
+    plt.imsave(buf, np.repeat(g[:, :, None], 3, axis=2), format="png")
+    return buf.getvalue(), len(files)
+
+
 # ------------------------------------------------------------------ 3d surfaces
 # Scrolling slices tells you whether a boundary is right. It does not tell you whether
 # a structure came out the right shape - a segmentation that leaked into the next lobe
@@ -1683,6 +1764,19 @@ class Handler(BaseHTTPRequestHandler):
                 # different address. This is what makes scrubbing back free.
                 return self._send(200, png, "image/png",
                                   {"Cache-Control": "private, max-age=300"})
+            if u.path == "/api/series/preview.png":
+                d = series_under_case(self._project(q), self._case(q),
+                                      q.get("path", ""))
+                png, n = series_preview_png(d, _qint(q, "i", 0),
+                                            _qint(q, "ww", 2500), _qint(q, "wl", 480))
+                return self._send(200, png, "image/png",
+                                  {"Cache-Control": "private, max-age=300",
+                                   "X-Slices": str(n)})
+            if u.path == "/api/series/info":
+                d = series_under_case(self._project(q), self._case(q),
+                                      q.get("path", ""))
+                return self._json({"slices": len(_series_files(d)),
+                                   "presets": WINDOW_PRESETS})
             if u.path == "/api/view/mesh.bin":
                 blob = view_mesh(self._project(q), self._case(q),
                                  q.get("task", ""), _qint(q, "i", -1))
