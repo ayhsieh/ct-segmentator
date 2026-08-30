@@ -691,7 +691,9 @@ async function follow(id, onTick) {
       try { s = await api("/api/job?id=" + id + "&since=" + since); }
       catch { return; }
       since = s.next;
-      onTick(s);
+      /* A throw while drawing one tick used to leave the poll running and the promise
+         unresolved, so the screen sat there forever with no error anywhere. */
+      try { onTick(s); } catch (e) { console.error("tick", e); }
       if (["done","failed","cancelled"].includes(s.state)) { stopPoll(); resolve(s); }
     }, 800);
   });
@@ -766,6 +768,7 @@ async function series(name, job, plan, cases) {
   view.append($(`<div>
     <h1>${plan ? "Checking the scans" : "Which series?"}</h1>
     <div id="snote"></div>
+    <div class="note amber" id="stally" style="display:none"></div>
     <div id="cs"></div>
     <div class="row" style="margin-top:16px">
       ${plan ? '<button id="go" disabled>Reading…</button>' : ""}
@@ -789,13 +792,39 @@ async function series(name, job, plan, cases) {
   const unresolved = new Set();
   const skipped = new Set();
   const blockers = new Set();
+
+  /* The ones still wanting an answer go to the top, so a long list does not have to be
+     scrolled through to find the three that matter. Reordered after every pick, not
+     only at the end, so a card leaves the queue the moment it is dealt with. */
+  const CATEGORY = {wait: 0, seen: 1, done: 2};
+  function categorise(cse) {
+    if (unresolved.has(cse)) return "wait";
+    if (skipped.has(cse)) return "done";
+    return slots[cse] && slots[cse].dataset.cat === "done" ? "done" : "seen";
+  }
+  function reorder() {
+    const cards = Object.entries(slots).filter(([, el]) => el && el.isConnected);
+    cards.sort((a, b) => CATEGORY[categorise(a[0])] - CATEGORY[categorise(b[0])]
+                      || a[0].localeCompare(b[0]));
+    for (const [, el] of cards) cs.append(el);        // append moves, it does not copy
+  }
   function retest() {
     const go = document.getElementById("go");
-    if (!go) return;
-    go.disabled = unresolved.size > 0;
-    go.textContent = unresolved.size
-      ? `${unresolved.size} case(s) still need a series`
-      : "Start segmenting";
+    if (go) {
+      go.disabled = unresolved.size > 0;
+      go.textContent = unresolved.size
+        ? `${unresolved.size} case(s) still need a series`
+        : "Start segmenting";
+    }
+    const tally = document.getElementById("stally");
+    if (tally) {
+      tally.textContent = unresolved.size
+        ? `${unresolved.size} of ${Object.keys(slots).length} still need a series` +
+          " — those are the ones at the top"
+        : "";
+      tally.style.display = unresolved.size ? "" : "none";
+    }
+    reorder();
   }
   /* What the scan chose by itself, per case, so going ahead can record those choices
      and the screen genuinely does not come back for the same cases. */
@@ -838,11 +867,9 @@ async function series(name, job, plan, cases) {
     retest();
   });
 
-  if (!plan) return;
-
-  /* The scan is finished: decide whether this screen still has a job to do. Cases with
-     a recorded choice need no confirmation, so an all-cached run carries straight on -
-     the screen was the progress display. Anything else waits for a look. */
+  /* Which cases still want an answer. Worked out whether or not a run is waiting on
+     this screen, because the ordering and the count are just as useful when you opened
+     it yourself to check. */
   const blocking = Object.entries(last)
     .filter(([, r]) => r.error || r.decision === "manual" || r.decision === "none")
     .map(([c]) => c);
@@ -851,6 +878,8 @@ async function series(name, job, plan, cases) {
   blocking.forEach(c => blockers.add(c));
   blocking.filter(c => !skipped.has(c)).forEach(c => unresolved.add(c));
   retest();
+
+  if (!plan) return;
 
   if (!blocking.length && !unseen.length) {
     snote.append($(`<div class="note">Every case already had a series chosen. Starting
@@ -908,6 +937,7 @@ async function series(name, job, plan, cases) {
           card.querySelector(".pill").outerHTML =
             '<span class="pill on">chosen by you</span>';
           delete autoPick[cse];          /* the user's pick is already written */
+          card.dataset.cat = "done";
           unresolved.delete(cse); retest();
           if (res.cleared_nifti)
             card.append($(`<div class="note amber">Removed the old converted image so
