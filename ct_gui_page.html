@@ -293,6 +293,35 @@ async function newProject(preset) {
   let cur = null;
   const found = document.getElementById("found");
 
+  /* Unzipping here rather than leaving it to the pipeline, which deletes each archive
+     once it has read it - acceptable for a working copy, not for the folder someone
+     just pointed at. Each zip is extracted beside itself and kept. */
+  function zipOffer(zips) {
+    const box = $(`<div style="margin:0 0 16px">
+      <div class="row"><button class="ghost" id="unz">Unzip
+        ${zips.length === 1 ? "it" : `all ${zips.length}`}, keeping the zip files</button>
+        <span class="meta">${esc(zips.slice(0, 4).join(", "))}${
+          zips.length > 4 ? ` and ${zips.length - 4} more` : ""}</span></div>
+      <div id="unzout"></div></div>`);
+    box.querySelector("#unz").onclick = async (ev) => {
+      const undo = pending(ev.currentTarget, "Unzipping…");
+      const out = box.querySelector("#unzout"); out.innerHTML = "";
+      try {
+        const {job} = await api("/api/unzip", {path: cur});
+        await follow(job, (st) => {
+          out.innerHTML = "";
+          out.append($(`<div class="meta">${esc(st.state)} · step ${st.step} of
+            ${st.steps}${st.step_label ? " · " + esc(st.step_label) : ""}</div>`));
+          for (const line of st.lines || [])
+            out.append($(`<div class="meta mono">${esc(line)}</div>`));
+        });
+        undo();
+        detect(document.getElementById("pick"));   /* look again, now they are folders */
+      } catch (e) { undo(); out.append(err(e)); }
+    };
+    return box;
+  }
+
   async function detect(btn) {
     const done = pending(btn, "Looking for cases…");
     found.innerHTML = "";
@@ -301,8 +330,14 @@ async function newProject(preset) {
       done();
       if (d.error) { found.append(err({message:d.error})); return; }
       if (!d.cases.length) {
-        found.append($(`<div class="note warn">No DICOM files found under
-          ${esc(cur)}. Open a subfolder and try again.</div>`)); return;
+        found.append(d.zips && d.zips.length
+          ? $(`<div class="note amber">No DICOM files under ${esc(cur)} yet, but there
+              ${d.zips.length === 1 ? "is 1 zip file" : `are ${d.zips.length} zip files`}
+              here. Unzip ${d.zips.length === 1 ? "it" : "them"} and look again.</div>`)
+          : $(`<div class="note warn">No DICOM files found under ${esc(cur)}.
+              Open a subfolder and try again.</div>`));
+        if (d.zips && d.zips.length) found.append(zipOffer(d.zips));
+        return;
       }
       const box = $(`<div><h2>${d.cases.length} case${d.cases.length===1?"":"s"} found</h2>
         <div id="zipwarn"></div>
@@ -316,10 +351,10 @@ async function newProject(preset) {
         <div id="cerr"></div></div>`);
       found.append(box);
       if (d.zips && d.zips.length) {
-        document.getElementById("zipwarn").append($(`<div class="note amber">
-          This folder still has ${d.zips.length} zip file(s) in it. The pipeline
-          <b>unzips and then deletes</b> zip files it finds. Unzip them yourself first
-          if you want to keep the originals.</div>`));
+        const zw = document.getElementById("zipwarn");
+        zw.append($(`<div class="note amber">This folder also holds ${d.zips.length}
+          zip file(s), which are not part of the ${d.cases.length} case(s) above.</div>`));
+        zw.append(zipOffer(d.zips));
       }
       const cl = document.getElementById("cl");
       for (const c of d.cases) {

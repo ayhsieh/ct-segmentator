@@ -747,6 +747,43 @@ def job_scan(project, cases):
     return job
 
 
+def job_unzip(folder):
+    """Extract every .zip sitting in a chosen folder, next to itself, keeping the zip.
+
+    The pipeline's own extract_and_cleanup_zips deletes each archive once it has been
+    read, which is fine for a working copy and wrong for the folder someone just picked
+    - that is their data. This does the extraction and nothing else.
+    """
+    folder = Path(folder)
+    zips = sorted(f for f in folder.glob("*.zip") if f.is_file())
+
+    def make(z):
+        def run(job):
+            import zipfile
+            dest = z.with_suffix("")
+            if dest.exists() and any(dest.iterdir()):
+                job.emit(f"{z.name}: {dest.name}/ is already there, leaving it alone")
+                return
+            try:
+                with zipfile.ZipFile(z) as zf:
+                    members = zf.namelist()
+                    # a zip can name ../../elsewhere; extracted blindly that writes
+                    # outside the folder the person chose
+                    for m in members:
+                        mp = Path(m)
+                        if mp.is_absolute() or ".." in mp.parts:
+                            raise RuntimeError(f"unsafe path in the archive: {m}")
+                    dest.mkdir(parents=True, exist_ok=True)
+                    zf.extractall(dest)
+                job.emit(f"{z.name}: {len(members)} entries -> {dest.name}/")
+            except Exception as e:
+                job.emit(f"{z.name}: FAILED - {type(e).__name__}: {e}")
+        return run
+
+    steps = [(f"unzipping {z.name}", make(z)) for z in zips]
+    return Job("unzip", "", f"unzip {len(zips)} archive(s)", steps, queue_name="light")
+
+
 # --------------------------------------------------------------- series selection
 AUTO_MIN_SCORE, AUTO_MIN_GAP = 20, 15       # segment_structures.py:467-468
 
@@ -1742,6 +1779,12 @@ class Handler(BaseHTTPRequestHandler):
                                    body["snum"], body.get("desc", ""))
                 cleared = clear_converted(name, case)
                 return self._json({"saved": entry, "cleared_nifti": cleared})
+
+            if u.path == "/api/unzip":
+                folder = Path(body.get("path") or "")
+                if not folder.is_dir():
+                    return self._json({"error": f"not a folder: {folder}"}, 400)
+                return self._json({"job": submit(job_unzip(folder)).id})
 
             if u.path == "/api/pick":
                 path, why = native_folder_dialog(body.get("start") or "")
