@@ -506,12 +506,14 @@ async function project(name) {
     <tbody></tbody></table>`);
   for (const c of st.case_status) {
     const tr = $(`<tr id="row-${esc(c.case)}">
-      <td><input type="checkbox" class="ck" checked value="${esc(c.case)}"></td>
+      <td><input type="checkbox" class="ck" ${c.skipped ? "" : "checked"}
+        value="${esc(c.case)}"></td>
       <td><b>${esc(c.case)}</b><div class="meta status"></div></td>
       <td>${c.converted ? '<span class="pill on">yes</span>' : '<span class="pill">no</span>'}</td>
       <td>${c.tasks.length ? c.tasks.map(x=>`<span class="pill on">${esc(x)}</span>`).join("")
                            : '<span class="pill">none</span>'}</td>
-      <td>${c.fossae ? '<span class="pill on">fossae</span>' : ''}
+      <td>${c.skipped ? '<span class="pill amber">set aside</span>' : ''}
+          ${c.fossae ? '<span class="pill on">fossae</span>' : ''}
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
           ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
       <td class="row" style="gap:2px">
@@ -520,6 +522,7 @@ async function project(name) {
         ${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}
         ${c.tasks.length || c.fossae || c.brain_icv
           ? '<button class="quiet sif" title="open this case\'s output folder">show in folder</button>' : ''}
+        ${c.skipped ? '<button class="quiet unsk">put back</button>' : ''}
       </td>
     </tr>`);
     const vsg = tr.querySelector(".vsg");
@@ -528,6 +531,13 @@ async function project(name) {
     if (rev) rev.onclick = () => nav("fossa", name, c.case);
     const sif = tr.querySelector(".sif");
     if (sif) sif.onclick = (ev) => reveal(name, c.case, "", null, ev.currentTarget);
+    const unsk = tr.querySelector(".unsk");
+    if (unsk) unsk.onclick = async (ev) => {
+      pending(ev.currentTarget, "Putting back…");
+      try { await api("/api/project/skip", {project:name, case:c.case, skip:false});
+            nav("project", name); }
+      catch (e) { document.getElementById("runerr").append(err(e)); }
+    };
     tbl.querySelector("tbody").append(tr);
   }
   cases.append(tbl);
@@ -777,6 +787,8 @@ async function series(name, job, plan, cases) {
     cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
 
   const unresolved = new Set();
+  const skipped = new Set();
+  const blockers = new Set();
   function retest() {
     const go = document.getElementById("go");
     if (!go) return;
@@ -794,12 +806,23 @@ async function series(name, job, plan, cases) {
       for (const [cse, chosen] of Object.entries(autoPick))
         await api("/api/series/pick", {project:name, case:cse,
           series_dir:chosen.series_dir, snum:chosen.snum, desc:chosen.desc});
-      const r = await api("/api/run", plan);
+      const go = Object.assign({}, plan,
+        {cases: plan.cases.filter(c => !skipped.has(c))});
+      if (!go.cases.length) {
+        cs.append(err({message:"Every case is set aside, so there is nothing to run."}));
+        if (undo) undo(); return;
+      }
+      const r = await api("/api/run", go);
       running(name, r.jobs);
     } catch (e) { if (undo) undo(); cs.append(err(e)); }
   }
   const go = document.getElementById("go");
   if (go) go.onclick = (ev) => launch(ev.currentTarget);
+
+  try {
+    const pst = await api("/api/project?name=" + encodeURIComponent(name));
+    (pst.case_status || []).forEach(c => { if (c.skipped) skipped.add(c.case); });
+  } catch (e) { /* the cards still work; they just start unticked */ }
 
   let last = {};
   await follow(job, (s) => {
@@ -825,7 +848,8 @@ async function series(name, job, plan, cases) {
     .map(([c]) => c);
   const unseen = Object.entries(last)
     .filter(([, r]) => !r.error && r.decision === "auto").map(([c]) => c);
-  blocking.forEach(c => unresolved.add(c));
+  blocking.forEach(c => blockers.add(c));
+  blocking.filter(c => !skipped.has(c)).forEach(c => unresolved.add(c));
   retest();
 
   if (!blocking.length && !unseen.length) {
@@ -852,7 +876,10 @@ async function series(name, job, plan, cases) {
                    manual:'<span class="pill amber">needs you to choose</span>',
                    none:'<span class="pill warn">no series found</span>'}[r.decision];
     const card = $(`<div class="card"><div class="row">
-      <h3>${esc(cse)}</h3>${badge}</div>
+      <h3>${esc(cse)}</h3>${badge}
+      <label class="ui meta right" title="leave this case out for now; you can put it
+        back at any time from the project page"><input type="checkbox" class="skipck">
+        set aside</label></div>
       <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
         <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
       <tbody></tbody></table></div>`);
@@ -890,6 +917,19 @@ async function series(name, job, plan, cases) {
       tr.querySelector(".look").onclick = () => preview(card, cse, s);
       tb.append(tr);
     }
+    /* A case whose series cannot be told apart, or that has none worth using, would
+       otherwise hold up every other case in the run. Setting it aside is recorded on
+       the project, not on the scan, so it survives and so it can be undone. */
+    const sk = card.querySelector(".skipck");
+    sk.checked = !!skipped.has(cse);
+    sk.onchange = async () => {
+      skipped[sk.checked ? "add" : "delete"](cse);
+      if (sk.checked) unresolved.delete(cse);
+      else if (blockers.has(cse)) unresolved.add(cse);
+      retest();
+      try { await api("/api/project/skip", {project:name, case:cse, skip:sk.checked}); }
+      catch (e) { card.append(err(e)); }
+    };
     return card;
   }
 

@@ -472,6 +472,7 @@ def project_state(name):
         link = PROJECTS / name / c["case"]
         st["online"] = link.exists()
         st["source"] = c.get("series_root", c.get("path", ""))
+        st["skipped"] = c["case"] in set(pr.get("skipped", []))
         cases.append(st)
     pr = dict(pr)
     pr["case_status"] = cases
@@ -1837,6 +1838,21 @@ class Handler(BaseHTTPRequestHandler):
                               "description": (body.get("description") or "").strip()[:2000],
                               "cases": cases})
                 return self._json({"name": name, "linked": made, "failed": failed})
+
+            if u.path == "/api/project/skip":
+                # A set-aside case, not a deleted one: the folder, the link and every
+                # output stay exactly where they are, and clearing the flag is the
+                # whole of undoing it.
+                name = self._project(body)
+                pr = load_project(name)
+                case = body.get("case") or ""
+                if not any(c["case"] == case for c in pr.get("cases", [])):
+                    return self._json({"error": f"no case {case} in {name}"}, 400)
+                sk = set(pr.get("skipped", []))
+                sk.add(case) if body.get("skip") else sk.discard(case)
+                pr["skipped"] = sorted(sk)
+                save_project(pr)
+                return self._json({"skipped": pr["skipped"]})
 
             if u.path == "/api/project/describe":
                 name = self._project(body)
