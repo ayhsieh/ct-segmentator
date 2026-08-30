@@ -720,29 +720,44 @@ def job_table(project, kind):
     return Job("table", project, f"CSV: {kind}", [step], queue_name="light")
 
 
-def job_scan(project, cases):
+def job_scan(project, cases, quick=False):
     """Score the DICOM series of each case, out of process so the server never imports
     torch, and so one unreadable folder cannot take the server down."""
     results = {}
 
-    def make(case):
-        def run(job):
-            link = PROJECTS / project / case
-            argv = PY + ["ct_gui.py", "--scan", str(link)]
-            r = subprocess.run(argv, cwd=str(APP), env=child_env(),
-                               capture_output=True, text=True,
-                               stdin=subprocess.DEVNULL, errors="replace")
+    def run(job):
+        """One child for the whole list. Importing segment_structures costs a couple of
+        seconds - it pulls in torch - and a child per case paid that per case, which for
+        a project of any size was most of the wait."""
+        # --quick before --scan: --scan takes the rest of the line, so a flag after it
+        # is read as a path
+        argv = PY + ["ct_gui.py"] + (["--quick"] if quick else []) + ["--scan"]
+        argv += [str(PROJECTS / project / c) for c in cases]
+        proc = subprocess.Popen(argv, cwd=str(APP), env=child_env(),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL, text=True, bufsize=1,
+                                errors="replace")
+        job.proc = proc
+        for line in proc.stdout:                 # a case at a time, as each finishes
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
             try:
-                results[case] = json.loads(r.stdout.strip().splitlines()[-1])
-                n = len(results[case].get("series", []))
-                job.emit(f"{case}: {n} series, "
-                         f"{results[case].get('decision', '?')}")
+                r = json.loads(line)
             except Exception:
-                results[case] = {"error": (r.stderr or r.stdout or "scan failed")[-800:]}
-                job.emit(f"{case}: scan failed")
-        return run
+                continue
+            case = Path(r.get("path", "")).name
+            results[case] = r
+            job.step_label = f"read {case}"
+            job.emit(f"{case}: {len(r.get('series', []))} series, "
+                     f"{r.get('decision', '?')}")
+        err = proc.stderr.read()
+        proc.wait()
+        job.proc = None
+        for c in cases:                          # whatever the child never reported
+            results.setdefault(c, {"error": (err or "scan failed")[-800:]})
 
-    steps = [(f"scanning {c}", make(c)) for c in cases]
+    steps = [(f"reading {len(cases)} case(s)", run)]
     job = Job("scan", project, f"scan {len(cases)} case(s)", steps, queue_name="light")
     job.results = results
     return job
@@ -789,7 +804,7 @@ def job_unzip(folder):
 AUTO_MIN_SCORE, AUTO_MIN_GAP = 20, 15       # segment_structures.py:467-468
 
 
-def scan_folder(path):
+def scan_folder(path, quick=False):
     """Run inside the --scan child. Reuses the pipeline's own scoring so the GUI can
     never disagree with what the CLI would have chosen."""
     from segment_structures import (get_series, get_series_metadata, score_series,
@@ -805,6 +820,12 @@ def scan_folder(path):
                 cached = {"snum": snum, "desc": desc,
                           "series_dir": cache[k].get("series_dir", "")}
             break
+
+    if cached and quick:
+        # This is the whole reason the command line starts instantly on a study it has
+        # seen before: a recorded choice answers the question, so nothing is read.
+        return {"path": str(path), "key": key, "decision": "cached", "chosen": cached,
+                "series": [], "quick": True}
 
     series_map, _ = get_series(path)
     rows = []
@@ -1873,7 +1894,8 @@ class Handler(BaseHTTPRequestHandler):
                 name = self._project(body)
                 pr = load_project(name)
                 cases = body.get("cases") or [c["case"] for c in pr["cases"]]
-                return self._json({"job": submit(job_scan(name, cases)).id})
+                return self._json({"job": submit(
+                    job_scan(name, cases, quick=bool(body.get("quick")))).id})
 
             if u.path == "/api/convert":
                 name = self._project(body)
@@ -1991,14 +2013,23 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--open", action="store_true", help="open a browser too")
-    ap.add_argument("--scan", metavar="PATH", help="internal: score a folder's series")
+    ap.add_argument("--scan", nargs="+", metavar="PATH",
+                    help="internal: score the series of one or more folders")
+    ap.add_argument("--quick", action="store_true",
+                    help="internal: with --scan, answer from the recorded choice "
+                         "without reading the series again")
     ap.add_argument("--convert", nargs=2, metavar=("GROUP", "CASE"),
                     help="internal: convert one case from DICOM to NIfTI")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
     if args.scan:
-        print(json.dumps(scan_folder(args.scan)))
+        for path in args.scan:
+            try:
+                out = scan_folder(path, quick=args.quick)
+            except Exception as e:
+                out = {"path": path, "error": f"{type(e).__name__}: {e}"}
+            print(json.dumps(out), flush=True)   # one line per folder, as it finishes
         return
     if args.convert:
         print(convert_case(*args.convert))

@@ -627,7 +627,10 @@ async function project(name) {
          unresolved case would be skipped silently and look like a run that worked.
          The scan screen goes up immediately and fills in case by case, then either
          continues on its own or waits, depending on what it found. */
-      const {job} = await api("/api/scan", {project:name, cases:cs});
+      /* quick: a case with a recorded choice is answered from that choice instead of
+         every series being read again, which is why the command line starts at once on
+         a study it has seen before. Check series first asks for the full read. */
+      const {job} = await api("/api/scan", {project:name, cases:cs, quick:true});
       undo();
       return series(name, job, plan, cs);
     } catch (e) { undo(); box.append(err(e)); }
@@ -914,6 +917,16 @@ async function series(name, job, plan, cases) {
       <tbody></tbody></table></div>`);
     if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
     const tb = card.querySelector("tbody");
+    if (r.quick) {
+      /* Answered from the recorded choice, so the series were never read and there is
+         no table to show - which is the point, and worth saying rather than leaving an
+         empty box. */
+      card.append($(`<div class="meta">series ${esc(r.chosen ? r.chosen.snum : "?")}
+        &mdash; ${esc((r.chosen && r.chosen.desc) || "chosen earlier")} &middot;
+        <b>Check series first</b> re-reads them if you want to change it</div>`));
+      card.querySelector("table").remove();
+      return card;
+    }
     for (const s of r.series) {
       const chosen = r.chosen && String(r.chosen.snum) === String(s.snum);
       const tr = $(`<tr class="${chosen ? "sel" : ""}">
