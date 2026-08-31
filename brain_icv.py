@@ -161,6 +161,28 @@ def process_case(group, case, device, write_nifti=False, segment=True):
     return stats
 
 
+def cached_stats(group, case):
+    """The numbers from a previous run, when they are still the right ones.
+
+    process_case already writes brain_icv.stats.json per case, and the CSV is those
+    numbers in a row - so recomputing them means decompressing seventeen label volumes
+    to arrive at what is already on disk. Reused only when the file is newer than every
+    input it was made from, so re-running a segmentation invalidates it by itself.
+    """
+    d = seg_dir_for(group) / case
+    f = d / "brain_icv.stats.json"
+    if not f.exists():
+        return None
+    inputs = list((d / BRAIN_TASK).glob("*.nii.gz")) + [d / "total" / "brain.nii.gz"]
+    newest = max((i.stat().st_mtime for i in inputs if i.exists()), default=None)
+    if newest is None or f.stat().st_mtime < newest:
+        return None
+    try:
+        return json.loads(f.read_text())
+    except Exception:
+        return None
+
+
 def natkey(name):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
 
@@ -175,6 +197,9 @@ def main():
     ap.add_argument("--nifti", action="store_true",
                     help="also write the two masks as NIfTI")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--recompute", action="store_true",
+                    help="ignore each case's saved brain_icv.stats.json and work the "
+                         "volumes out again from the masks")
     ap.add_argument("--no-segment", action="store_true",
                     help="tabulate what is already there; report cases that would "
                          "need segmenting rather than segmenting them")
@@ -187,8 +212,12 @@ def main():
     rows, ok = [], 0
     for i, case in enumerate(cases, 1):
         try:
-            s = process_case(args.group, case, args.device, args.nifti,
-                             segment=not args.no_segment)
+            s = None if args.recompute else cached_stats(args.group, case)
+            if s is not None:
+                log(f"[{i}/{len(cases)}] {case}: from {case}/brain_icv.stats.json")
+            else:
+                s = process_case(args.group, case, args.device, args.nifti,
+                                 segment=not args.no_segment)
         except Exception as e:
             s = {"case": case, "status": f"error: {e}"}
             traceback.print_exc()
