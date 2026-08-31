@@ -9,10 +9,15 @@ what segment_structures.py already wrote, so it is safe to run any time.
 
     python produce_table.py --group fossa
     python produce_table.py --group fossa --out fossa_table.csv
+
+--select takes a JSON file naming what to keep: {"task": ["structure", ...]}, where an
+empty list means the whole task, and "_scan" covers the series and slice-count columns.
+Without it the table holds everything, as it always did.
 """
 import argparse
 import json
 import os
+import pathlib
 
 import nibabel as nib
 import pandas as pd
@@ -25,7 +30,22 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--group", default="fossa")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--select", default=None, metavar="FILE",
+                    help="JSON file of {task: [structure, ...]} to keep; an empty list "
+                         "means the whole task, and _scan the series columns")
     args = ap.parse_args()
+
+    keep = None
+    if args.select:
+        keep = {k: set(v) for k, v in json.loads(
+            pathlib.Path(args.select).read_text()).items()}
+
+    def wanted(task, structure=None):
+        if keep is None:
+            return True
+        if task not in keep:
+            return False
+        return structure is None or not keep[task] or structure in keep[task]
 
     total_dir = seg_dir_for(args.group)
     nifti_dir = nifti_dir_for(args.group)
@@ -48,10 +68,11 @@ def main():
             if not isinstance(d, dict):
                 continue
             for structure, info in d.items():
-                if isinstance(info, dict) and "volume_mm3" in info:
+                if (isinstance(info, dict) and "volume_mm3" in info
+                        and wanted(task, structure)):
                     rows[case][f"{task}_{structure}_volume"] = info["volume_mm3"]
 
-    for case in cases:
+    for case in cases if wanted("_scan") else []:
         nifti_case_dir = nifti_dir / case
         if not nifti_case_dir.is_dir():
             continue

@@ -701,14 +701,21 @@ def fossa_csv(project, out):
     return len(rows)
 
 
-def job_table(project, kind):
+def job_table(project, kind, select=None):
     out = seg_dir_for(project) / {
         "produce_table": f"{project}_table.csv",
         "brain_icv": "brain_icv_volumes.csv",
         "fossae": "fossa_volumes.csv"}[kind]
     if kind == "produce_table":
-        step = (f"building {out.name}",
-                PY + ["produce_table.py", "--group", project, "--out", str(out)])
+        argv = PY + ["produce_table.py", "--group", project, "--out", str(out)]
+        if select:
+            # via a file rather than the command line: a whole-body task alone is over
+            # a hundred structures, and that argv would not survive the trip
+            sel = seg_dir_for(project) / ".table_columns.json"
+            sel.parent.mkdir(parents=True, exist_ok=True)
+            sel.write_text(json.dumps(select, indent=2))
+            argv += ["--select", str(sel)]
+        step = (f"building {out.name}", argv)
     elif kind == "brain_icv":
         # A table reports what has been computed. Segmenting is what Start segmenting
         # and the analyses are for, so --no-segment is not optional here.
@@ -721,6 +728,34 @@ def job_table(project, kind):
             job.emit(f"{n} case(s) -> {out}")
         step = (f"building {out.name}", build)
     return Job("table", project, f"CSV: {kind}", [step], queue_name="light")
+
+
+def table_columns(project):
+    """What could go in the wide table: every structure of every task, from the same
+    stats files produce_table reads, with how many cases carry each."""
+    tasks = {}
+    root = seg_dir_for(project)
+    cases = [d for d in root.iterdir() if d.is_dir()] if root.is_dir() else []
+    for d in cases:
+        for f in d.glob("*.stats.json"):
+            task = f.name[: -len(".stats.json")]
+            try:
+                stats = json.loads(f.read_text())
+            except Exception:
+                continue
+            if not isinstance(stats, dict):
+                continue
+            seen = tasks.setdefault(task, {})
+            for name, info in stats.items():
+                if isinstance(info, dict) and "volume_mm3" in info:
+                    seen[name] = seen.get(name, 0) + 1
+    out = [{"task": t, "structures": [{"name": n, "cases": c}
+                                      for n, c in sorted(v.items())]}
+           for t, v in sorted(tasks.items()) if v]
+    out.append({"task": "_scan", "label": "scan details",
+                "structures": [{"name": "series and slice count",
+                                "cases": len(cases)}]})
+    return {"cases": len(cases), "tasks": out}
 
 
 def job_scan(project, cases, quick=False):
@@ -1743,6 +1778,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "zips": sorted(f.name for f in
                                                   Path(q.get("path", ".")).glob("*.zip"))
                                    if Path(q.get("path", ".")).is_dir() else []})
+            if u.path == "/api/columns":
+                return self._json(table_columns(self._project(q)))
             if u.path == "/api/jobs":
                 with LOCK:
                     ids = list(JOB_ORDER)[-40:]
@@ -1958,7 +1995,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/table":
                 name = self._project(body)
                 return self._json({"job": submit(
-                    job_table(name, body.get("kind", "produce_table"))).id})
+                    job_table(name, body.get("kind", "produce_table"),
+                              select=body.get("select"))).id})
 
             if u.path == "/api/job/cancel":
                 job = JOBS.get(body.get("id", ""))

@@ -646,15 +646,82 @@ async function project(name) {
       <span class="right"></span>
       <button class="ghost bld">Build</button>
       <button class="ghost dl">Download</button>
+      ${kind === "produce_table"
+        ? '<button class="quiet cols">choose columns</button>' : ""}
       <button class="quiet sif" title="open it in Explorer/Finder">show in folder</button>
-      </div><div class="out"></div></div>`);
+      </div><div class="pick hide"></div><div class="out"></div></div>`);
     c.querySelector(".sif").onclick = (ev) =>
       reveal(name, "", file, c.querySelector(".out"), ev.currentTarget);
+    /* null until asked for: no selection means every column, which is what the table
+       has always been. */
+    let select = null;
+    const colsBtn = c.querySelector(".cols");
+    if (colsBtn) colsBtn.onclick = async (ev) => {
+      const box = c.querySelector(".pick");
+      if (!box.classList.contains("hide")) { box.classList.add("hide"); return; }
+      box.classList.remove("hide");
+      if (box.dataset.built) return;
+      const undo = pending(ev.currentTarget, "Reading\u2026");
+      try {
+        const {tasks} = await api("/api/columns?name=" + encodeURIComponent(name));
+        box.dataset.built = "1";
+        box.innerHTML = "";
+        const chosen = new Map(tasks.map(t => [t.task, new Set()]));   // empty = all
+        const on = new Set(tasks.map(t => t.task));
+        function sync() {
+          select = {};
+          for (const t of on) select[t] = [...chosen.get(t)];
+          const n = tasks.reduce((a, t) => a + (on.has(t.task)
+            ? (chosen.get(t.task).size || t.structures.length) : 0), 0);
+          box.querySelector(".tot").textContent =
+            `${n} of ${tasks.reduce((a, t) => a + t.structures.length, 0)} columns`;
+        }
+        const wrap = $(`<div class="tasklist" style="max-height:320px;margin:10px 0">
+          </div>`);
+        for (const t of tasks) {
+          const grp = $(`<div></div>`);
+          const head = $(`<label style="display:flex;gap:9px;padding:8px 12px;
+            background:var(--panel);cursor:pointer;align-items:center">
+            <input type="checkbox" checked>
+            <b class="ui">${esc(t.label || t.task)}</b>
+            <span class="meta">${t.structures.length}</span>
+            <span class="right meta open" style="text-decoration:underline">list</span>
+            </label>`);
+          const body = $(`<div class="hide"></div>`);
+          for (const st of t.structures) {
+            const row = $(`<label style="display:flex;gap:9px;padding:5px 12px 5px 32px">
+              <input type="checkbox" class="one">
+              <span class="tname">${esc(st.name)}</span>
+              <span class="right meta">${st.cases}</span></label>`);
+            row.querySelector("input").onchange = (e) => {
+              const set = chosen.get(t.task);
+              e.target.checked ? set.add(st.name) : set.delete(st.name);
+              sync();
+            };
+            body.append(row);
+          }
+          head.querySelector("input").onchange = (e) => {
+            e.target.checked ? on.add(t.task) : on.delete(t.task);
+            sync();
+          };
+          head.querySelector(".open").onclick = (e) => {
+            e.preventDefault(); body.classList.toggle("hide");
+          };
+          grp.append(head, body);
+          wrap.append(grp);
+        }
+        box.append(wrap);
+        box.append($(`<div class="meta tot"></div>`));
+        sync();
+      } catch (e) { box.append(err(e)); } finally { undo(); }
+    };
+
     c.querySelector(".bld").onclick = async (ev) => {
       const undo = pending(ev.currentTarget, "Building…");
       const out = c.querySelector(".out"); out.innerHTML = "";
       try {
-        const {job} = await api("/api/table", {project:name, kind});
+        const {job} = await api("/api/table",
+          Object.assign({project:name, kind}, select ? {select} : {}));
         /* The last few lines, not just a spinner: a build that is quietly segmenting a
            case says so, and one that has finished says that too. */
         const tail = [];
