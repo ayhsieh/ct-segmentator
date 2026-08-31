@@ -230,8 +230,10 @@ def main():
             log(f"[{i}/{len(cases)}] {case}: SKIP - {s['status']}")
 
     out = args.out or str(seg_dir_for(args.group) / "brain_icv_volumes.csv")
-    cols = ["case", "status", "brain_ml", "icv_ml", "brain_min_worldZ",
-            "removed_from_brain_ml", "brain_clipped_to_icv_ml", "voxel_ml"]
+    # The working numbers - the cut height, what was removed, the voxel size - stay in
+    # each case's brain_icv.stats.json, where they are there to check a result against.
+    # The table is the two volumes.
+    cols = ["case", "status", "brain_ml", "icv_ml"]
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
