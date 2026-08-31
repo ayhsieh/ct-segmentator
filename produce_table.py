@@ -17,7 +17,7 @@ import os
 import nibabel as nib
 import pandas as pd
 
-from segment_structures import seg_dir_for, nifti_dir_for
+from ct_paths import seg_dir_for, nifti_dir_for
 
 
 def main():

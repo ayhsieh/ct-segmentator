@@ -647,21 +647,35 @@ async function project(name) {
       <button class="ghost bld">Build</button>
       <button class="ghost dl">Download</button>
       <button class="quiet sif" title="open it in Explorer/Finder">show in folder</button>
-      </div><div class="out"></div></div>`);
+      </div>${kind === "brain_icv" ? `<label class="ui meta"
+        style="display:block;margin-top:8px"><input type="checkbox" class="seg">
+        segment anything missing first &mdash; minutes to hours; without it those cases
+        are listed as unavailable</label>` : ""}
+      <div class="out"></div></div>`);
     c.querySelector(".sif").onclick = (ev) =>
       reveal(name, "", file, c.querySelector(".out"), ev.currentTarget);
     c.querySelector(".bld").onclick = async (ev) => {
       const undo = pending(ev.currentTarget, "Building…");
       const out = c.querySelector(".out"); out.innerHTML = "";
       try {
-        const {job} = await api("/api/table", {project:name, kind});
+        const segck = c.querySelector(".seg");
+        const {job} = await api("/api/table",
+          {project:name, kind, segment: !!(segck && segck.checked)});
+        /* The last few lines, not just a spinner: a build that is quietly segmenting a
+           case says so, and one that has finished says that too. */
+        const tail = [];
         await follow(job, (s) => {
+          for (const line of s.lines || []) tail.push(line);
           out.innerHTML = "";
           out.append($(`<div class="meta">${esc(s.state)}${
-            s.state==="running" ? " · " + fmtTime(s.elapsed) : ""}</div>`));
+            s.state === "running" ? " · " + fmtTime(s.elapsed) : ""}</div>`));
+          for (const line of tail.slice(-4))
+            out.append($(`<div class="meta mono">${esc(line)}</div>`));
           if (s.state === "failed")
             out.append($(`<div class="note warn">${esc(
-              (s.lines||[]).slice(-3).join("\n") || s.error)}</div>`));
+              tail.slice(-3).join(String.fromCharCode(10)) || s.error)}</div>`));
+          if (s.state === "done")
+            out.append($(`<div class="note">Built. Press Download.</div>`));
         });
       } catch (e) { out.append(err(e)); } finally { undo(); }
     };

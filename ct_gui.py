@@ -701,7 +701,7 @@ def fossa_csv(project, out):
     return len(rows)
 
 
-def job_table(project, kind):
+def job_table(project, kind, segment=False):
     out = seg_dir_for(project) / {
         "produce_table": f"{project}_table.csv",
         "brain_icv": "brain_icv_volumes.csv",
@@ -710,8 +710,13 @@ def job_table(project, kind):
         step = (f"building {out.name}",
                 PY + ["produce_table.py", "--group", project, "--out", str(out)])
     elif kind == "brain_icv":
-        step = (f"building {out.name}",
-                PY + ["brain_icv.py", "--group", project, "--out", str(out)])
+        # brain_icv segments whatever a case is missing, which is right on the command
+        # line and wrong behind a button labelled Build: asked for a table, nobody
+        # expects an hour of GPU. Off unless asked for.
+        argv = PY + ["brain_icv.py", "--group", project, "--out", str(out)]
+        if not segment:
+            argv.append("--no-segment")
+        step = (f"building {out.name}", argv)
     else:
         def build(job):
             n = fossa_csv(project, out)
@@ -1955,7 +1960,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/table":
                 name = self._project(body)
                 return self._json({"job": submit(
-                    job_table(name, body.get("kind", "produce_table"))).id})
+                    job_table(name, body.get("kind", "produce_table"),
+                              segment=bool(body.get("segment")))).id})
 
             if u.path == "/api/job/cancel":
                 job = JOBS.get(body.get("id", ""))
@@ -1995,6 +2001,26 @@ def selftest():
         print(f"cuda        : {torch.cuda.is_available()}")
     except Exception:
         pass
+
+    # The page is one big inline script, so a single typo in it renders a header and
+    # nothing else - no error the user can see, and the server none the wiser. If node
+    # happens to be here, say whether the script parses.
+    try:
+        import re as _re
+        import tempfile
+        code = _re.search(r"<script>(.*)</script>", PAGE_FILE.read_text(encoding="utf-8"),
+                          _re.S).group(1).replace("__TOKEN__", "x")
+        tmp = Path(tempfile.gettempdir()) / "ct_gui_page_check.js"
+        tmp.write_text(code, encoding="utf-8")
+        r = subprocess.run(["node", "--check", str(tmp)], capture_output=True, text=True)
+        ok = r.returncode == 0
+        print("page script : " + ("parses" if ok else "SYNTAX ERROR"))
+        if not ok:
+            print(r.stderr.strip()[:400])
+    except FileNotFoundError:
+        print("page script : not checked (node is not installed)")
+    except Exception as e:
+        print(f"page script : not checked ({type(e).__name__})")
 
 
 def free_port(start=8000, tries=12):

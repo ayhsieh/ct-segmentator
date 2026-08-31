@@ -81,22 +81,33 @@ def write_two_layer_segnrrd(segments, affine, out_path):
     nrrd.write(str(out_path), data, header, index_order="F")
 
 
-def ensure_masks(group, case, device):
-    """Segment whatever this case is missing, so a bare DICOM folder is enough."""
+def ensure_masks(group, case, device, segment=True):
+    """Segment whatever this case is missing, so a bare DICOM folder is enough.
+
+    With segment=False the missing pieces are reported instead. Tabulating what has
+    already been computed and segmenting a study are both reasonable things to ask
+    for, but they take seconds and hours respectively, so the caller says which.
+    """
     d = seg_dir_for(group) / case
     bdir, brain_p = d / BRAIN_TASK, d / "total" / "brain.nii.gz"
     if not (bdir.is_dir() and any(bdir.glob("*.nii.gz"))):
+        if not segment:
+            log(f"{case}: no {BRAIN_TASK} - skipping", 1)
+            return bdir, brain_p
         log(f"{case}: no {BRAIN_TASK} - segmenting", 1)
         run_task_for_case(group, case, device, BRAIN_TASK)
     if not brain_p.exists():
+        if not segment:
+            log(f"{case}: no total/brain - skipping", 1)
+            return bdir, brain_p
         log(f"{case}: no total/brain - segmenting", 1)
         run_task_for_case(group, case, device, "total", ("--roi-subset", "brain"))
     return bdir, brain_p
 
 
-def process_case(group, case, device, write_nifti=False):
+def process_case(group, case, device, write_nifti=False, segment=True):
     d = seg_dir_for(group) / case
-    bdir, brain_p = ensure_masks(group, case, device)
+    bdir, brain_p = ensure_masks(group, case, device, segment)
     if not brain_p.exists() or not bdir.is_dir():
         return {"case": case, "status": "segmentation unavailable"}
 
@@ -164,6 +175,9 @@ def main():
     ap.add_argument("--nifti", action="store_true",
                     help="also write the two masks as NIfTI")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--no-segment", action="store_true",
+                    help="tabulate what is already there; report cases that would "
+                         "need segmenting rather than segmenting them")
     args = ap.parse_args()
 
     cases = args.case or sorted(discover_cases(args.group), key=natkey)
@@ -173,7 +187,8 @@ def main():
     rows, ok = [], 0
     for i, case in enumerate(cases, 1):
         try:
-            s = process_case(args.group, case, args.device, args.nifti)
+            s = process_case(args.group, case, args.device, args.nifti,
+                             segment=not args.no_segment)
         except Exception as e:
             s = {"case": case, "status": f"error: {e}"}
             traceback.print_exc()

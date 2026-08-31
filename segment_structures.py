@@ -11,6 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 
+# Defined in ct_paths so that a program which only reads results - produce_table, the
+# CSV builders - can find them without importing this module and, through it, torch.
+from ct_paths import DATA_ROOT, group_dir, nifti_dir_for, seg_dir_for   # noqa: F401
+
 import pydicom
 import dicom2nifti
 import dicom2nifti.settings as dicom2nifti_settings
@@ -26,35 +30,6 @@ dicom2nifti_settings.disable_validate_multiframe_implicit()
 
 CACHE_FILE = Path(".series_selection_cache.json")
 
-
-DATA_ROOT = Path(os.environ.get("CT_DATA_ROOT", "ct_scans"))
-
-
-def group_dir(group):
-    """Where a study group's folder lives.
-
-    Scans live under ct_scans/, which is gitignored as a directory - so no amount of
-    `git add -A` can put patient data into the repository. Set CT_DATA_ROOT to keep
-    them somewhere else entirely, an external drive say.
-
-    A group still sitting in the repo root is honoured if it is there, so an older
-    checkout keeps working; anything that does not exist yet resolves under
-    ct_scans/, which is where new work should go."""
-    p = Path(group)
-    if p.is_absolute():
-        return p
-    under = DATA_ROOT / group
-    return under if under.exists() or not p.exists() else p
-
-
-def nifti_dir_for(group):
-    """Directory under `<group>/converted_nifti_<group>/` for a study group."""
-    return group_dir(group) / f"converted_nifti_{group}"
-
-
-def seg_dir_for(group):
-    """Directory under `<group>/total_segmentor_results_<group>/` for a study group."""
-    return group_dir(group) / f"total_segmentor_results_{group}"
 
 # Every task TotalSegmentator accepts for -ta, split the way it splits them itself:
 # the ones below call show_license_info() in totalsegmentator/python_api.py and the
