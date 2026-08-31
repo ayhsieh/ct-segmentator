@@ -701,7 +701,7 @@ def fossa_csv(project, out):
     return len(rows)
 
 
-def job_table(project, kind, segment=False):
+def job_table(project, kind):
     out = seg_dir_for(project) / {
         "produce_table": f"{project}_table.csv",
         "brain_icv": "brain_icv_volumes.csv",
@@ -710,13 +710,11 @@ def job_table(project, kind, segment=False):
         step = (f"building {out.name}",
                 PY + ["produce_table.py", "--group", project, "--out", str(out)])
     elif kind == "brain_icv":
-        # brain_icv segments whatever a case is missing, which is right on the command
-        # line and wrong behind a button labelled Build: asked for a table, nobody
-        # expects an hour of GPU. Off unless asked for.
-        argv = PY + ["brain_icv.py", "--group", project, "--out", str(out)]
-        if not segment:
-            argv.append("--no-segment")
-        step = (f"building {out.name}", argv)
+        # A table reports what has been computed. Segmenting is what Start segmenting
+        # and the analyses are for, so --no-segment is not optional here.
+        step = (f"building {out.name}",
+                PY + ["brain_icv.py", "--group", project, "--out", str(out),
+                      "--no-segment"])
     else:
         def build(job):
             n = fossa_csv(project, out)
@@ -1960,8 +1958,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/table":
                 name = self._project(body)
                 return self._json({"job": submit(
-                    job_table(name, body.get("kind", "produce_table"),
-                              segment=bool(body.get("segment")))).id})
+                    job_table(name, body.get("kind", "produce_table"))).id})
 
             if u.path == "/api/job/cancel":
                 job = JOBS.get(body.get("id", ""))

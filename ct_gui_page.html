@@ -647,20 +647,14 @@ async function project(name) {
       <button class="ghost bld">Build</button>
       <button class="ghost dl">Download</button>
       <button class="quiet sif" title="open it in Explorer/Finder">show in folder</button>
-      </div>${kind === "brain_icv" ? `<label class="ui meta"
-        style="display:block;margin-top:8px"><input type="checkbox" class="seg">
-        segment anything missing first &mdash; minutes to hours; without it those cases
-        are listed as unavailable</label>` : ""}
-      <div class="out"></div></div>`);
+      </div><div class="out"></div></div>`);
     c.querySelector(".sif").onclick = (ev) =>
       reveal(name, "", file, c.querySelector(".out"), ev.currentTarget);
     c.querySelector(".bld").onclick = async (ev) => {
       const undo = pending(ev.currentTarget, "Building…");
       const out = c.querySelector(".out"); out.innerHTML = "";
       try {
-        const segck = c.querySelector(".seg");
-        const {job} = await api("/api/table",
-          {project:name, kind, segment: !!(segck && segck.checked)});
+        const {job} = await api("/api/table", {project:name, kind});
         /* The last few lines, not just a spinner: a build that is quietly segmenting a
            case says so, and one that has finished says that too. */
         const tail = [];
@@ -675,7 +669,7 @@ async function project(name) {
             out.append($(`<div class="note warn">${esc(
               tail.slice(-3).join(String.fromCharCode(10)) || s.error)}</div>`));
           if (s.state === "done")
-            out.append($(`<div class="note">Built. Press Download.</div>`));
+            out.append($(`<div class="note">Built.</div>`));
         });
       } catch (e) { out.append(err(e)); } finally { undo(); }
     };
@@ -836,8 +830,7 @@ async function series(name, job, plan, cases) {
     const tally = document.getElementById("stally");
     if (tally) {
       tally.textContent = unresolved.size
-        ? `${unresolved.size} of ${Object.keys(slots).length} still need a series` +
-          " — those are the ones at the top"
+        ? `${unresolved.size} of ${Object.keys(slots).length} still need a series`
         : "";
       tally.style.display = unresolved.size ? "" : "none";
     }
@@ -923,9 +916,8 @@ async function series(name, job, plan, cases) {
                    none:'<span class="pill warn">no series found</span>'}[r.decision];
     const card = $(`<div class="card"><div class="row">
       <h3>${esc(cse)}</h3>${badge}
-      <label class="ui meta right" title="leave this case out for now; you can put it
-        back at any time from the project page"><input type="checkbox" class="skipck">
-        set aside</label></div>
+      <label class="ui meta right" title="leave this case out of the run"><input
+        type="checkbox" class="skipck"> set aside</label></div>
       <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
         <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
       <tbody></tbody></table></div>`);
@@ -936,8 +928,7 @@ async function series(name, job, plan, cases) {
          no table to show - which is the point, and worth saying rather than leaving an
          empty box. */
       card.append($(`<div class="meta">series ${esc(r.chosen ? r.chosen.snum : "?")}
-        &mdash; ${esc((r.chosen && r.chosen.desc) || "chosen earlier")} &middot;
-        <b>Check series first</b> re-reads them if you want to change it</div>`));
+        &mdash; ${esc((r.chosen && r.chosen.desc) || "chosen earlier")}</div>`));
       card.querySelector("table").remove();
       return card;
     }
@@ -1084,9 +1075,7 @@ async function fossa(name, cse) {
                  style="width:74px;margin-left:6px"></label>
         <span class="meta">degrees</span>
       </div>
-      <div class="meta" style="margin-top:6px">Pitch tips the walls front to back, roll
-        side to side, in the head’s own frame. Changing either re-measures the floor
-        map, so any boundary you traced is re-read against the new surface.</div>
+      <div class="meta" style="margin-top:6px">Pitch tips the walls front to back, roll side to side.</div>
     </fieldset>
     <div class="row"><button id="apply">Apply and recompute</button>
       <button class="ghost" id="drop">Drop corrections</button>
@@ -1094,9 +1083,6 @@ async function fossa(name, cse) {
       <button class="quiet" id="back">Back</button></div>
     <div id="fout"></div>
     <h2>Result</h2>
-    <div class="meta" style="margin-bottom:8px">The floor map with the fitted
-      boundaries, and the sagittal slice as 3D Slicer would show it. This is what the
-      pitch and roll above change — check the walls against the bone here.</div>
     <img id="result" style="max-width:100%;border:1px solid var(--line);
       border-radius:8px;background:var(--surface)">
     <div id="rout"></div>
