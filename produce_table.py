@@ -22,6 +22,7 @@ import pathlib
 import nibabel as nib
 import pandas as pd
 
+from ct_dates import study_date
 from ct_paths import seg_dir_for, nifti_dir_for
 
 
@@ -73,6 +74,12 @@ def main():
                     rows[case][f"{task}_{structure}_volume"] = info["volume_mm3"]
 
     for case in cases if wanted("_scan") else []:
+        # the date of the series this case was segmented from, not of whatever DICOM
+        # the folder happens to hold first
+        d, note = study_date(args.group, case)
+        rows[case]["study_date"] = d
+        if note:
+            rows[case]["study_date_note"] = note
         nifti_case_dir = nifti_dir / case
         if not nifti_case_dir.is_dir():
             continue

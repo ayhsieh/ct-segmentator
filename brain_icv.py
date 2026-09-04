@@ -35,6 +35,7 @@ import nrrd
 
 from segment_fossae import (log, load_bool, world_z, run_task_for_case,
                             discover_cases, BRAIN_TASK)
+from ct_dates import study_date
 from segment_structures import seg_dir_for
 
 COLORS = {"intracranial_volume": "0.400 0.750 1.000", "brain": "1.000 0.450 0.450"}
@@ -221,6 +222,7 @@ def main():
         except Exception as e:
             s = {"case": case, "status": f"error: {e}"}
             traceback.print_exc()
+        s["study_date"] = study_date(args.group, case)[0]
         rows.append(s)
         if s.get("status") == "ok":
             ok += 1
@@ -233,7 +235,7 @@ def main():
     # The working numbers - the cut height, what was removed, the voxel size - stay in
     # each case's brain_icv.stats.json, where they are there to check a result against.
     # The table is the two volumes.
-    cols = ["case", "status", "brain_ml", "icv_ml"]
+    cols = ["case", "study_date", "status", "brain_ml", "icv_ml"]
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()

@@ -677,6 +677,7 @@ def fossa_csv(project, out):
     produce_table.py only picks up stats shaped {structure: {"volume_mm3": ...}}, so it
     silently omits the fossa results, which nest under "compartments"."""
     import csv as _csv
+    from ct_dates import study_date
     rows = []
     seg = seg_dir_for(project)
     for d in sorted(p for p in seg.iterdir() if p.is_dir()):
@@ -684,7 +685,10 @@ def fossa_csv(project, out):
         if not hits:
             continue
         st = json.loads(hits[0].read_text())
-        row = {"case": d.name, "icv_ml": st.get("icv_ml")}
+        row = {"case": d.name,
+               "study_date": study_date(project, d.name,
+                                        case_dir=PROJECTS / project / d.name)[0],
+               "icv_ml": st.get("icv_ml")}
         for comp, v in st.get("compartments", {}).items():
             row[f"{comp}_ml"] = v["ml"]
             row[f"{comp}_pct_icv"] = v["percent_of_icv"]
