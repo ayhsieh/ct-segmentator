@@ -856,60 +856,103 @@ def job_scan(project, cases, quick=False):
     return job
 
 
-def job_unzip(folder, workers=4, delete_zips=False):
-    """Extract every .zip sitting in a chosen folder, next to itself.
+def _workers(body):
+    try:
+        return min(16, max(1, int(body.get("workers") or 4)))
+    except (TypeError, ValueError):
+        return 4
 
-    delete_zips removes each archive once it has been unpacked - and only then, never
-    after a failure, so a half-read download is still there to try again.
 
-    Several at once: decompression is mostly zlib, which releases the GIL, so threads
-    genuinely overlap rather than taking turns.
+def job_import(name, source, chosen, mode, description="", delete_zips=False,
+               workers=4, into=False):
+    """Bring cases into a project: unpack the archives, link or move the folders.
+
+    A job rather than part of the request, because a folder of two hundred archives is
+    minutes of work and the person who pressed the button deserves to see it happening
+    and be able to stop it. Archives are unpacked several at a time; linking and moving
+    are quick and happen in order afterwards.
     """
-    folder = Path(folder)
-    todo = [z for z in sorted(folder.glob("*.zip"))
-            if z.is_file()
-            and not (z.with_suffix("").is_dir() and any(z.with_suffix("").iterdir()))]
-
-    def one(z, job):
-        import zipfile
-        dest = z.with_suffix("")
-        try:
-            with zipfile.ZipFile(z) as zf:
-                members = zf.namelist()
-                # a zip can name ../../elsewhere; extracted blindly that writes outside
-                # the folder the person chose
-                for m in members:
-                    mp = Path(m)
-                    if mp.is_absolute() or ".." in mp.parts:
-                        raise RuntimeError(f"unsafe path in the archive: {m}")
-                dest.mkdir(parents=True, exist_ok=True)
-                zf.extractall(dest)
-            if delete_zips:
-                z.unlink()
-                return True, f"{z.name}: {len(members)} entries -> {dest.name}/, zip deleted"
-            return True, f"{z.name}: {len(members)} entries -> {dest.name}/"
-        except Exception as e:
-            return False, f"{z.name}: FAILED - {type(e).__name__}: {e}"
+    pr = load_project(name) if into else None
+    have = {c["case"] for c in (pr or {}).get("cases", [])}
+    todo, skipped = [], []
+    for c in chosen:
+        if c["case"] in have:
+            skipped.append(c["case"])          # same name, same case
+            continue
+        have.add(c["case"])
+        todo.append(c)
+    zips = [c for c in todo if c.get("zip")]
 
     def run(job):
         from concurrent.futures import ThreadPoolExecutor
-        done = 0
-        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            futures = [(z, pool.submit(one, z, job)) for z in todo]
-            # waited on in file order while they all run at once, so the log reads
-            # down the folder rather than in whatever order the threads finished
-            for i, (z, fut) in enumerate(futures, 1):
-                if job.cancelled:
-                    fut.cancel()
-                    continue
-                ok, line = fut.result()
-                job.emit(line)
-                done += ok
-                job.step_label = f"{i} of {len(todo)}"
-        job.emit(f"{done} of {len(todo)} archive(s) unpacked")
+        results = {}
+        if zips:
+            job.step_label = f"unpacking {len(zips)} archive(s)"
 
-    return Job("unzip", "", f"unzip {len(todo)} archive(s), {workers} at once",
-               [(f"unpacking {len(todo)} archive(s)", run)], queue_name="light")
+            def unpack(c):
+                dest = PROJECTS / name / c["case"]
+                ok, msg, sr = import_case(dest, c, mode)
+                if ok and delete_zips:
+                    try:
+                        Path(c["zip"]).unlink()      # only once it is safely out
+                        msg = "unpacked, zip deleted"
+                    except Exception as e:
+                        msg = f"unpacked, but the zip is still there ({e})"
+                return c["case"], (ok, msg, sr)
+
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                futures = [pool.submit(unpack, c) for c in zips]
+                for i, fut in enumerate(futures, 1):
+                    if job.cancelled:
+                        fut.cancel()
+                        continue
+                    case, r = fut.result()
+                    results[case] = r
+                    job.emit(f"{case}: {r[1] or ('unpacked' if r[0] else 'failed')}")
+                    job.step_label = f"{i} of {len(zips)} unpacked"
+
+        for c in todo:
+            if job.cancelled:
+                break
+            if c["case"] in results:
+                continue
+            dest = PROJECTS / name / c["case"]
+            ok, msg, sr = import_case(dest, c, mode)
+            results[c["case"]] = (ok, msg, sr)
+            job.emit(f"{c['case']}: {'moved' if mode == 'move' else 'linked'}"
+                     if ok else f"{c['case']}: {msg}")
+
+        cases, failed = [], []
+        for c in todo:
+            ok, msg, sr = results.get(c["case"], (False, "cancelled", ""))
+            if ok:
+                cases.append({"case": c["case"],
+                              "path": str(PROJECTS / name / c["case"])
+                              if (mode == "move" or c.get("zip")) else c["path"],
+                              "series_root": sr})
+            else:
+                failed.append(f"{c['case']}: {msg}")
+
+        if into:
+            if cases:
+                pr["cases"] = pr.get("cases", []) + cases
+                save_project(pr)
+        else:
+            if not cases:
+                raise RuntimeError("no case could be brought in. "
+                                   + "; ".join(failed[:3]))
+            save_project({"name": name, "source": source, "mode": mode,
+                          "created": time.strftime("%Y-%m-%d %H:%M"),
+                          "description": description, "cases": cases})
+        for f in failed:
+            job.emit("!! " + f)
+        if skipped:
+            job.emit(f"already in the project, left alone: {', '.join(skipped)}")
+        job.emit(f"{len(cases)} case(s) in {name}")
+
+    verb = "adding to" if into else "creating"
+    return Job("import", name, f"{verb} {name}: {len(todo)} case(s)",
+               [(f"{len(todo)} case(s)", run)], queue_name="light")
 
 
 # --------------------------------------------------------------- series selection
@@ -1963,28 +2006,11 @@ class Handler(BaseHTTPRequestHandler):
                 mode = body.get("mode", "link")
                 if mode not in ("link", "move"):
                     return self._json({"error": f"unknown mode: {mode!r}"}, 400)
-                chosen = body.get("cases") or []
-                cases, made, failed = [], 0, []
-                for c in chosen:
-                    dest = PROJECTS / name / c["case"]
-                    ok, msg, sr = import_case(dest, c, mode)
-                    if ok:
-                        made += 1
-                        cases.append({"case": c["case"],
-                                      "path": str(dest) if mode == "move" else c["path"],
-                                      "series_root": sr})
-                    else:
-                        failed.append(f"{c['case']}: {msg}")
-                if not cases:
-                    verb = "move" if mode == "move" else "link"
-                    return self._json({"error": f"could not {verb} any case. "
-                                       + "; ".join(failed[:3])}, 400)
-                save_project({"name": name, "source": str(src), "mode": mode,
-                              "created": time.strftime("%Y-%m-%d %H:%M"),
-                              "description": (body.get("description") or "").strip()[:2000],
-                              "cases": cases})
-                return self._json({"name": name, "linked": made, "failed": failed,
-                                   "mode": mode})
+                return self._json({"job": submit(job_import(
+                    name, str(src), body.get("cases") or [], mode,
+                    description=(body.get("description") or "").strip()[:2000],
+                    delete_zips=bool(body.get("delete_zips")),
+                    workers=_workers(body))).id, "name": name})
 
             if u.path == "/api/project/add":
                 name = self._project(body)
@@ -1992,26 +2018,10 @@ class Handler(BaseHTTPRequestHandler):
                 mode = body.get("mode") or pr.get("mode", "link")
                 if mode not in ("link", "move"):
                     return self._json({"error": f"unknown mode: {mode!r}"}, 400)
-                have = {c["case"] for c in pr.get("cases", [])}
-                added, failed, skipped = [], [], []
-                for c in body.get("cases") or []:
-                    if c["case"] in have:
-                        skipped.append(c["case"])       # a name is a folder here
-                        continue
-                    dest = PROJECTS / name / c["case"]
-                    ok, msg, sr = import_case(dest, c, mode)
-                    if ok:
-                        added.append({"case": c["case"],
-                                      "path": str(dest) if mode == "move" else c["path"],
-                                      "series_root": sr})
-                    else:
-                        failed.append(f"{c['case']}: {msg}")
-                if added:
-                    pr["cases"] = pr.get("cases", []) + added
-                    save_project(pr)
-                return self._json({"added": [c["case"] for c in added],
-                                   "already_there": skipped, "failed": failed,
-                                   "mode": mode})
+                return self._json({"job": submit(job_import(
+                    name, pr.get("source", ""), body.get("cases") or [], mode,
+                    delete_zips=bool(body.get("delete_zips")),
+                    workers=_workers(body), into=True)).id, "name": name})
 
             if u.path == "/api/project/skip":
                 # A set-aside case, not a deleted one: the folder, the link and every
@@ -2072,17 +2082,6 @@ class Handler(BaseHTTPRequestHandler):
                                    body["snum"], body.get("desc", ""))
                 cleared = clear_converted(name, case)
                 return self._json({"saved": entry, "cleared_nifti": cleared})
-
-            if u.path == "/api/unzip":
-                folder = Path(body.get("path") or "")
-                if not folder.is_dir():
-                    return self._json({"error": f"not a folder: {folder}"}, 400)
-                try:
-                    workers = min(16, max(1, int(body.get("workers") or 4)))
-                except (TypeError, ValueError):
-                    workers = 4
-                return self._json({"job": submit(job_unzip(
-                    folder, workers, bool(body.get("delete_zips")))).id})
 
             if u.path == "/api/pick":
                 path, why = native_folder_dialog(body.get("start") or "")

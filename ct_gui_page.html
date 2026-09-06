@@ -295,42 +295,6 @@ async function newProject(preset, into) {
   let cur = null;
   const found = document.getElementById("found");
 
-  /* Unzipping here rather than leaving it to the pipeline, which deletes each archive
-     once it has read it - acceptable for a working copy, not for the folder someone
-     just pointed at. Each zip is extracted beside itself and kept. */
-  function zipOffer(zips) {
-    const box = $(`<div style="margin:0 0 16px">
-      <div class="row"><button class="ghost" id="unz">Unzip, keeping the zip files
-        </button>
-        <label class="ui meta"><input type="number" id="unzn" min="1" max="16"
-          step="1" value="4" style="width:70px;margin-right:6px">
-          at once</label>
-        <label class="ui meta"><input type="checkbox" id="unzdel" checked
-          style="margin-right:6px">delete each zip once it is unpacked</label></div>
-      <div class="meta">${esc(zips.slice(0, 4).join(", "))}${
-        zips.length > 4 ? ` and ${zips.length - 4} more` : ""}</div>
-      <div id="unzout"></div></div>`);
-    box.querySelector("#unz").onclick = async (ev) => {
-      const undo = pending(ev.currentTarget, "Unzipping…");
-      const out = box.querySelector("#unzout"); out.innerHTML = "";
-      try {
-        const {job} = await api("/api/unzip",
-          {path: cur, workers: +box.querySelector("#unzn").value || 4,
-           delete_zips: box.querySelector("#unzdel").checked});
-        await follow(job, (st) => {
-          out.innerHTML = "";
-          out.append($(`<div class="meta">${esc(st.state)} · step ${st.step} of
-            ${st.steps}${st.step_label ? " · " + esc(st.step_label) : ""}</div>`));
-          for (const line of st.lines || [])
-            out.append($(`<div class="meta mono">${esc(line)}</div>`));
-        });
-        undo();
-        detect(document.getElementById("pick"));   /* look again, now they are folders */
-      } catch (e) { undo(); out.append(err(e)); }
-    };
-    return box;
-  }
-
   async function detect(btn) {
     const done = pending(btn, "Looking for cases…");
     found.innerHTML = "";
@@ -340,17 +304,13 @@ async function newProject(preset, into) {
       done();
       if (d.error) { found.append(err({message:d.error})); return; }
       if (!d.cases.length) {
-        found.append(d.zips && d.zips.length
-          ? $(`<div class="note amber">No DICOM files under ${esc(cur)} yet, but there
-              ${d.zips.length === 1 ? "is 1 zip file" : `are ${d.zips.length} zip files`}
-              here. Unzip ${d.zips.length === 1 ? "it" : "them"} and look again.</div>`)
-          : $(`<div class="note warn">No DICOM files found under ${esc(cur)}.
-              Open a subfolder and try again.</div>`));
-        if (d.zips && d.zips.length) found.append(zipOffer(d.zips));
+        found.append($(`<div class="note warn">No DICOM files or archives found under
+          ${esc(cur)}. Open a subfolder and try again.</div>`));
         return;
       }
-      const box = $(`<div><h2>${d.cases.length} case${d.cases.length===1?"":"s"} found</h2>
-        <div id="zipwarn"></div>
+      const nzip = d.cases.filter(c => c.zip).length;
+      const box = $(`<div><h2>${d.cases.length} case${d.cases.length===1?"":"s"} found${
+          nzip ? `, ${nzip} of them zip files` : ""}</h2>
         <div class="card" id="cl" style="max-height:290px;overflow:auto"></div>
         <div class="stack" style="margin-top:16px">
           <label style="display:flex;gap:9px;align-items:flex-start">
@@ -364,24 +324,24 @@ async function newProject(preset, into) {
             <span><b class="ui">Move</b>
               <div class="meta">The scan folders are moved into the project and are no
                 longer in <span class="mono">${esc(cur)}</span>. The project becomes the
-                only copy. Large folders take a while.</div>
+                only copy.</div>
             </span></label>
         </div>
+        ${nzip ? `<div class="row" style="margin-top:12px">
+          <span class="meta">Zip files are unpacked into the project either way.</span>
+          <label class="ui meta"><input type="checkbox" id="unzdel" checked
+            style="margin-right:6px">delete each zip once it is unpacked</label>
+          <label class="ui meta"><input type="number" id="unzn" min="1" max="16" step="1"
+            value="4" style="width:64px;margin-right:6px">at once</label></div>` : ""}
         <div class="row" style="margin-top:14px">
           ${into ? "" : `<input type="text" id="pname" placeholder="Project name"
-                 style="max-width:280px" value="${esc(cur.split(/[\\\\/]/).pop())}">
+                 style="max-width:280px" value="${esc(cur.split(/[\\/]/).pop())}">
           <input type="text" id="pdesc" placeholder="What is this? (optional)"
                  style="max-width:340px">`}
           <button id="create">${into ? "Add to " + esc(into) : "Create project"}</button>
           </div>
         <div id="cerr"></div></div>`);
       found.append(box);
-      if (d.zips && d.zips.length) {
-        const zw = document.getElementById("zipwarn");
-        zw.append($(`<div class="note amber">This folder also holds ${d.zips.length}
-          zip file(s), which are not part of the ${d.cases.length} case(s) above.</div>`));
-        zw.append(zipOffer(d.zips));
-      }
       const cl = document.getElementById("cl");
       for (const c of d.cases) {
         const r = $(`<label class="row" style="padding:4px 0">
@@ -396,29 +356,34 @@ async function newProject(preset, into) {
       }
       document.getElementById("create").onclick = async (ev) => {
         const mode = box.querySelector("input[name=mode]:checked").value;
-        const b = ev.currentTarget;
-        const undo = pending(b, mode === "move" ? "Moving…" : "Creating…");
+        const del = box.querySelector("#unzdel");
+        const nw = box.querySelector("#unzn");
+        const undo = pending(ev.currentTarget, "Working…");
         const cases = [...cl.querySelectorAll("input:checked")]
           .map(i => JSON.parse(i.dataset.case));
         const cerr = document.getElementById("cerr"); cerr.innerHTML = "";
+        const body = {cases, mode, delete_zips: !!(del && del.checked),
+                      workers: (nw && +nw.value) || 4};
         try {
-          if (into) {
-            const res = await api("/api/project/add", {project: into, cases, mode});
-            const notes = [];
-            if (res.already_there.length)
-              notes.push(res.already_there.length + " were already in the project: "
-                         + res.already_there.join(", "));
-            if (res.failed.length) notes.push(res.failed.join("\n"));
-            if (notes.length) alert(notes.join("\n\n"));
-            nav("project", into);
-            return;
-          }
-          const res = await api("/api/project/create", {
-            name: document.getElementById("pname").value, source: cur, cases, mode,
-            description: document.getElementById("pdesc").value});
-          if (res.failed && res.failed.length)
-            alert("Some cases were left out:\n" + res.failed.join("\n"));
-          nav("project", res.name);
+          const r = into
+            ? await api("/api/project/add", Object.assign({project: into}, body))
+            : await api("/api/project/create", Object.assign({source: cur,
+                name: document.getElementById("pname").value,
+                description: document.getElementById("pdesc").value}, body));
+          /* the work itself is a job now: show it happening rather than holding the
+             button down for as long as it takes to unpack two hundred archives */
+          await follow(r.job, (st) => {
+            cerr.innerHTML = "";
+            cerr.append($(`<div class="meta">${esc(st.state)}${
+              st.step_label ? " · " + esc(st.step_label) : ""}${
+              st.state === "running" ? " · " + fmtTime(st.elapsed) : ""}</div>`));
+            for (const line of (st.lines || []).slice(-8))
+              cerr.append($(`<div class="meta mono">${esc(line)}</div>`));
+            if (st.state === "failed")
+              cerr.append($(`<div class="note warn">${esc(st.error || "failed")}</div>`));
+          });
+          undo();
+          nav("project", r.name);
         } catch (e) { undo(); cerr.append(err(e)); }
       };
     } catch (e) { done(); found.append(err(e)); }
