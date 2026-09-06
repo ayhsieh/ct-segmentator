@@ -1017,9 +1017,13 @@ async function series(name, job, plan, cases) {
       <h3>${esc(cse)}</h3>${badge}
       <label class="ui meta right" title="leave this case out of the run"><input
         type="checkbox" class="skipck"> set aside</label></div>
-      <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
-        <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
-      <tbody></tbody></table></div>`);
+      <div style="display:flex;gap:14px;align-items:flex-start">
+        <div style="flex:1;min-width:0;overflow-x:auto">
+          <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
+            <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
+          <tbody></tbody></table></div>
+        <div class="prevslot"></div>
+      </div></div>`);
     if (r.decision === "manual" || r.decision === "none") card.dataset.wait = "1";
     if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
     const tb = card.querySelector("tbody");
@@ -1102,18 +1106,20 @@ async function series(name, job, plan, cases) {
     let box = card.querySelector(".prev");
     if (box && box.dataset.snum === String(row.snum)) { box.remove(); return; }
     if (box) box.remove();
-    box = $(`<div class="prev" style="margin-top:12px">
-      <div class="row" style="margin-bottom:6px">
+    /* Beside the table rather than under it: the point of looking is to compare the
+       picture with the row it belongs to. */
+    box = $(`<div class="prev" style="width:340px;flex:none">
+      <div style="margin-bottom:6px">
         <b class="ui">series ${esc(row.snum)}</b>
-        <span class="meta">${esc(row.desc || "(no description)")}</span>
-        <span class="right row" style="gap:4px" id="pw"></span></div>
-      <img class="pimg" style="max-width:100%;border:1px solid var(--line);
+        <div class="meta">${esc(row.desc || "(no description)")}</div>
+        <div class="row" style="gap:4px;margin-top:4px" id="pw"></div></div>
+      <img class="pimg" style="width:100%;border:1px solid var(--line);
         border-radius:6px;background:#000;image-rendering:pixelated">
       <input type="range" class="psl" style="width:100%;margin:8px 0 2px"
              min="0" max="0" value="0">
       <div class="meta mono plab"></div></div>`);
     box.dataset.snum = String(row.snum);
-    card.append(box);
+    card.querySelector(".prevslot").append(box);
 
     const im = box.querySelector(".pimg"), sl = box.querySelector(".psl");
     const lab = box.querySelector(".plab");
