@@ -4,8 +4,8 @@ Segments anatomical structures in CT and MRI scans using
 **[TotalSegmentator](https://github.com/wasserth/TotalSegmentator)** — organs, bones,
 muscles, vessels, brain regions — and gives you a spreadsheet of volumes.
 
-You drive it from your browser, but it runs entirely on your own computer. Your scans
-are read where they are; nothing is uploaded or copied.
+You drive it from your browser, but it runs entirely on your own computer. Nothing is
+uploaded anywhere.
 
 ---
 
@@ -104,8 +104,10 @@ python ct_gui.py --open
 ## Using it
 
 **Make a project.** Click **New project** — your folder chooser opens straight away.
-Pick the folder holding one subfolder per patient. Your DICOMs stay where they are;
-everything generated goes into `projects/` inside the tool's folder.
+Pick the folder holding one subfolder per patient, then choose **Link** to leave the
+scans where they are, or **Move** to relocate them into the project, which then holds
+the only copy. Either way, everything generated goes into `projects/` inside the tool's
+folder.
 
 > Unzip any `.zip` scans first — the pipeline deletes zip files after extracting them.
 

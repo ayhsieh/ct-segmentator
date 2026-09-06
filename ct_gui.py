@@ -390,6 +390,39 @@ def make_link(link, target):
     return True, ""
 
 
+def import_case(dest, spec, mode):
+    """Put one case where the project expects it, either by linking or by moving.
+
+    link: dest becomes a junction/symlink to the folder the scans already live in, and
+    nothing is copied or altered. move: the case folder itself is relocated into the
+    project, so afterwards the project holds the only copy.
+
+    Returns (ok, message, series_root) - the series root has to come back because a
+    move changes where it is.
+    """
+    dest = Path(dest)
+    case_root = Path(spec.get("path") or spec["series_root"])
+    series_root = Path(spec["series_root"])
+    if mode == "link":
+        ok, msg = make_link(dest, series_root)
+        return ok, msg, str(series_root)
+
+    if dest.exists() or dest.is_symlink():
+        return False, "something is already there", ""
+    try:
+        rel = series_root.relative_to(case_root)      # before the folder moves
+    except ValueError:
+        rel = Path(".")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # shutil.move renames within a volume and copies across one, so an external
+        # drive works too - slowly.
+        shutil.move(str(case_root), str(dest))
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}", ""
+    return True, "", str((dest / rel).resolve())
+
+
 def drop_link(link):
     """Remove a link without following it. rmtree through a junction would delete the
     user's DICOMs, so links are always taken out first and by name."""
@@ -477,6 +510,7 @@ def project_state(name):
     pr = dict(pr)
     pr["case_status"] = cases
     pr["seg_dir"] = str(seg_dir_for(name))
+    pr.setdefault("mode", "link")
     return pr
 
 
@@ -1884,25 +1918,31 @@ class Handler(BaseHTTPRequestHandler):
                 src = Path(body.get("source", ""))
                 if not src.is_dir():
                     return self._json({"error": f"not a folder: {src}"}, 400)
+                mode = body.get("mode", "link")
+                if mode not in ("link", "move"):
+                    return self._json({"error": f"unknown mode: {mode!r}"}, 400)
                 chosen = body.get("cases") or []
                 cases, made, failed = [], 0, []
                 for c in chosen:
-                    link = PROJECTS / name / c["case"]
-                    ok, msg = make_link(link, c["series_root"])
+                    dest = PROJECTS / name / c["case"]
+                    ok, msg, sr = import_case(dest, c, mode)
                     if ok:
                         made += 1
-                        cases.append({"case": c["case"], "path": c["path"],
-                                      "series_root": c["series_root"]})
+                        cases.append({"case": c["case"],
+                                      "path": str(dest) if mode == "move" else c["path"],
+                                      "series_root": sr})
                     else:
                         failed.append(f"{c['case']}: {msg}")
                 if not cases:
-                    return self._json({"error": "could not link any case. "
+                    verb = "move" if mode == "move" else "link"
+                    return self._json({"error": f"could not {verb} any case. "
                                        + "; ".join(failed[:3])}, 400)
-                save_project({"name": name, "source": str(src),
+                save_project({"name": name, "source": str(src), "mode": mode,
                               "created": time.strftime("%Y-%m-%d %H:%M"),
                               "description": (body.get("description") or "").strip()[:2000],
                               "cases": cases})
-                return self._json({"name": name, "linked": made, "failed": failed})
+                return self._json({"name": name, "linked": made, "failed": failed,
+                                   "mode": mode})
 
             if u.path == "/api/project/skip":
                 # A set-aside case, not a deleted one: the folder, the link and every
@@ -1929,6 +1969,14 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/project/delete":
                 name = self._project(body)
                 pr = load_project(name)
+                # A linked project owns nothing but its own output. A moved one holds
+                # the scans themselves, so deleting it destroys them - that has to be
+                # asked for in as many words.
+                if pr.get("mode") == "move" and not body.get("delete_scans"):
+                    return self._json({"error": "this project holds the scans "
+                                       "themselves, not links to them. Deleting it "
+                                       "deletes the DICOMs.",
+                                       "needs_confirm": True}, 409)
                 for c in pr.get("cases", []):
                     drop_link(PROJECTS / name / c["case"])
                 shutil.rmtree(PROJECTS / name, ignore_errors=True)

@@ -342,6 +342,21 @@ async function newProject(preset) {
       const box = $(`<div><h2>${d.cases.length} case${d.cases.length===1?"":"s"} found</h2>
         <div id="zipwarn"></div>
         <div class="card" id="cl" style="max-height:290px;overflow:auto"></div>
+        <div class="stack" style="margin-top:16px">
+          <label style="display:flex;gap:9px;align-items:flex-start">
+            <input type="radio" name="mode" value="link" checked>
+            <span><b class="ui">Link</b>
+              <div class="meta">The scans stay in
+                <span class="mono">${esc(cur)}</span>. The project points at them.</div>
+            </span></label>
+          <label style="display:flex;gap:9px;align-items:flex-start">
+            <input type="radio" name="mode" value="move">
+            <span><b class="ui">Move</b>
+              <div class="meta">The scan folders are moved into the project and are no
+                longer in <span class="mono">${esc(cur)}</span>. The project becomes the
+                only copy. Large folders take a while.</div>
+            </span></label>
+        </div>
         <div class="row" style="margin-top:14px">
           <input type="text" id="pname" placeholder="Project name"
                  style="max-width:280px" value="${esc(cur.split(/[\\\\/]/).pop())}">
@@ -366,16 +381,18 @@ async function newProject(preset) {
         cl.append(r);
       }
       document.getElementById("create").onclick = async (ev) => {
-        const b = ev.currentTarget, undo = pending(b, "Creating…");
+        const mode = box.querySelector("input[name=mode]:checked").value;
+        const b = ev.currentTarget;
+        const undo = pending(b, mode === "move" ? "Moving…" : "Creating…");
         const cases = [...cl.querySelectorAll("input:checked")]
           .map(i => JSON.parse(i.dataset.case));
         const cerr = document.getElementById("cerr"); cerr.innerHTML = "";
         try {
           const res = await api("/api/project/create", {
-            name: document.getElementById("pname").value, source: cur, cases,
+            name: document.getElementById("pname").value, source: cur, cases, mode,
             description: document.getElementById("pdesc").value});
           if (res.failed && res.failed.length)
-            alert("Some cases could not be linked:\n" + res.failed.join("\n"));
+            alert("Some cases were left out:\n" + res.failed.join("\n"));
           nav("project", res.name);
         } catch (e) { undo(); cerr.append(err(e)); }
       };
@@ -436,6 +453,7 @@ async function project(name) {
     <h1>${esc(name)}</h1>
     <div id="desc" style="margin:0 0 4px"></div>
     <p class="sub">${st.case_status.length} case(s) &middot;
+      ${st.mode === "move" ? "scans held here" : "linked to"}
       <span class="mono">${esc(st.source || "")}</span></p>
     ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
       folder that is not there right now - is the drive connected?</div>` : ""}
