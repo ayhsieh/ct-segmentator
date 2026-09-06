@@ -856,7 +856,7 @@ def job_scan(project, cases, quick=False):
     return job
 
 
-def job_unzip(folder):
+def job_unzip(folder, limit=0):
     """Extract every .zip sitting in a chosen folder, next to itself, keeping the zip.
 
     The pipeline's own extract_and_cleanup_zips deletes each archive once it has been
@@ -864,7 +864,14 @@ def job_unzip(folder):
     - that is their data. This does the extraction and nothing else.
     """
     folder = Path(folder)
-    zips = sorted(f for f in folder.glob("*.zip") if f.is_file())
+    zips = [f for f in sorted(folder.glob("*.zip")) if f.is_file()]
+    # already unpacked ones are skipped anyway, so counting a batch by what is left to
+    # do is what makes "ten at a time" mean ten
+    todo = [z for z in zips
+            if not (z.with_suffix("").is_dir() and any(z.with_suffix("").iterdir()))]
+    if limit:
+        todo = todo[:limit]
+    zips = todo
 
     def make(z):
         def run(job):
@@ -2058,7 +2065,11 @@ class Handler(BaseHTTPRequestHandler):
                 folder = Path(body.get("path") or "")
                 if not folder.is_dir():
                     return self._json({"error": f"not a folder: {folder}"}, 400)
-                return self._json({"job": submit(job_unzip(folder)).id})
+                try:
+                    limit = max(0, int(body.get("limit") or 0))
+                except (TypeError, ValueError):
+                    limit = 0
+                return self._json({"job": submit(job_unzip(folder, limit)).id})
 
             if u.path == "/api/pick":
                 path, why = native_folder_dialog(body.get("start") or "")

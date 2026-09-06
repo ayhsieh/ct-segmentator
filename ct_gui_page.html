@@ -300,16 +300,20 @@ async function newProject(preset, into) {
      just pointed at. Each zip is extracted beside itself and kept. */
   function zipOffer(zips) {
     const box = $(`<div style="margin:0 0 16px">
-      <div class="row"><button class="ghost" id="unz">Unzip
-        ${zips.length === 1 ? "it" : `all ${zips.length}`}, keeping the zip files</button>
-        <span class="meta">${esc(zips.slice(0, 4).join(", "))}${
-          zips.length > 4 ? ` and ${zips.length - 4} more` : ""}</span></div>
+      <div class="row"><button class="ghost" id="unz">Unzip, keeping the zip files
+        </button>
+        <label class="ui meta"><input type="number" id="unzn" min="0" step="1"
+          value="${Math.min(zips.length, 10)}" style="width:70px;margin-right:6px">
+          at a time (0 for all ${zips.length})</label></div>
+      <div class="meta">${esc(zips.slice(0, 4).join(", "))}${
+        zips.length > 4 ? ` and ${zips.length - 4} more` : ""}</div>
       <div id="unzout"></div></div>`);
     box.querySelector("#unz").onclick = async (ev) => {
       const undo = pending(ev.currentTarget, "Unzipping…");
       const out = box.querySelector("#unzout"); out.innerHTML = "";
       try {
-        const {job} = await api("/api/unzip", {path: cur});
+        const {job} = await api("/api/unzip",
+          {path: cur, limit: +box.querySelector("#unzn").value || 0});
         await follow(job, (st) => {
           out.innerHTML = "";
           out.append($(`<div class="meta">${esc(st.state)} · step ${st.step} of
