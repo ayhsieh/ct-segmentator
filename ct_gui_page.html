@@ -304,7 +304,9 @@ async function newProject(preset, into) {
         </button>
         <label class="ui meta"><input type="number" id="unzn" min="1" max="16"
           step="1" value="4" style="width:70px;margin-right:6px">
-          at once</label></div>
+          at once</label>
+        <label class="ui meta"><input type="checkbox" id="unzdel" checked
+          style="margin-right:6px">delete each zip once it is unpacked</label></div>
       <div class="meta">${esc(zips.slice(0, 4).join(", "))}${
         zips.length > 4 ? ` and ${zips.length - 4} more` : ""}</div>
       <div id="unzout"></div></div>`);
@@ -313,7 +315,8 @@ async function newProject(preset, into) {
       const out = box.querySelector("#unzout"); out.innerHTML = "";
       try {
         const {job} = await api("/api/unzip",
-          {path: cur, workers: +box.querySelector("#unzn").value || 4});
+          {path: cur, workers: +box.querySelector("#unzn").value || 4,
+           delete_zips: box.querySelector("#unzdel").checked});
         await follow(job, (st) => {
           out.innerHTML = "";
           out.append($(`<div class="meta">${esc(st.state)} · step ${st.step} of

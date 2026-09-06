@@ -856,12 +856,11 @@ def job_scan(project, cases, quick=False):
     return job
 
 
-def job_unzip(folder, workers=4):
-    """Extract every .zip sitting in a chosen folder, next to itself, keeping the zip.
+def job_unzip(folder, workers=4, delete_zips=False):
+    """Extract every .zip sitting in a chosen folder, next to itself.
 
-    The pipeline's own extract_and_cleanup_zips deletes each archive once it has been
-    read, which is fine for a working copy and wrong for the folder someone just picked
-    - that is their data. This does the extraction and nothing else.
+    delete_zips removes each archive once it has been unpacked - and only then, never
+    after a failure, so a half-read download is still there to try again.
 
     Several at once: decompression is mostly zlib, which releases the GIL, so threads
     genuinely overlap rather than taking turns.
@@ -885,9 +884,12 @@ def job_unzip(folder, workers=4):
                         raise RuntimeError(f"unsafe path in the archive: {m}")
                 dest.mkdir(parents=True, exist_ok=True)
                 zf.extractall(dest)
-            return f"{z.name}: {len(members)} entries -> {dest.name}/"
+            if delete_zips:
+                z.unlink()
+                return True, f"{z.name}: {len(members)} entries -> {dest.name}/, zip deleted"
+            return True, f"{z.name}: {len(members)} entries -> {dest.name}/"
         except Exception as e:
-            return f"{z.name}: FAILED - {type(e).__name__}: {e}"
+            return False, f"{z.name}: FAILED - {type(e).__name__}: {e}"
 
     def run(job):
         from concurrent.futures import ThreadPoolExecutor
@@ -896,13 +898,14 @@ def job_unzip(folder, workers=4):
             futures = [(z, pool.submit(one, z, job)) for z in todo]
             # waited on in file order while they all run at once, so the log reads
             # down the folder rather than in whatever order the threads finished
-            for z, fut in futures:
+            for i, (z, fut) in enumerate(futures, 1):
                 if job.cancelled:
                     fut.cancel()
                     continue
-                job.emit(fut.result())
-                done += 1
-                job.step_label = f"{done} of {len(todo)}"
+                ok, line = fut.result()
+                job.emit(line)
+                done += ok
+                job.step_label = f"{i} of {len(todo)}"
         job.emit(f"{done} of {len(todo)} archive(s) unpacked")
 
     return Job("unzip", "", f"unzip {len(todo)} archive(s), {workers} at once",
@@ -2078,7 +2081,8 @@ class Handler(BaseHTTPRequestHandler):
                     workers = min(16, max(1, int(body.get("workers") or 4)))
                 except (TypeError, ValueError):
                     workers = 4
-                return self._json({"job": submit(job_unzip(folder, workers)).id})
+                return self._json({"job": submit(job_unzip(
+                    folder, workers, bool(body.get("delete_zips")))).id})
 
             if u.path == "/api/pick":
                 path, why = native_folder_dialog(body.get("start") or "")
