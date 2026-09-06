@@ -869,14 +869,18 @@ async function series(name, job, plan, cases) {
     <h1>${plan ? "Checking the scans" : "Which series?"}</h1>
     <div id="snote"></div>
     <div class="note amber" id="stally" style="display:none"></div>
-    <div id="cs"></div>
-    <div class="row" style="margin-top:16px">
+    <div id="csTop"></div>
+    <div id="cs" style="max-height:52vh;overflow:auto;border:1px solid var(--line);
+      border-radius:10px;padding:10px 12px;background:var(--panel)"></div>
+    <div class="row" style="position:sticky;bottom:0;background:var(--bg);
+      padding:12px 0;margin-top:4px;border-top:1px solid var(--line)">
       ${plan ? '<button id="go" disabled>Reading…</button>' : ""}
       <button class="${plan ? "quiet" : ""}" id="doneb">Back to project</button>
       </div></div>`));
   document.getElementById("doneb").onclick = () => nav("project", name);
   const snote = document.getElementById("snote");
   const cs = document.getElementById("cs");
+  const csTop = document.getElementById("csTop");
 
   /* A placeholder per case up front, so a scan that takes a minute a case shows a list
      filling in rather than an empty screen. */
@@ -906,7 +910,9 @@ async function series(name, job, plan, cases) {
     const cards = Object.entries(slots).filter(([, el]) => el && el.isConnected);
     cards.sort((a, b) => CATEGORY[categorise(a[0])] - CATEGORY[categorise(b[0])]
                       || a[0].localeCompare(b[0]));
-    for (const [, el] of cards) cs.append(el);        // append moves, it does not copy
+    // the ones wanting an answer sit above the scrolling list, not merely first in it
+    for (const [cse, el] of cards)
+      (categorise(cse) === "wait" ? csTop : cs).append(el);   // append moves, not copies
   }
   function retest() {
     const go = document.getElementById("go");
