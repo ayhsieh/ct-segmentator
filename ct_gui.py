@@ -856,48 +856,57 @@ def job_scan(project, cases, quick=False):
     return job
 
 
-def job_unzip(folder, limit=0):
+def job_unzip(folder, workers=4):
     """Extract every .zip sitting in a chosen folder, next to itself, keeping the zip.
 
     The pipeline's own extract_and_cleanup_zips deletes each archive once it has been
     read, which is fine for a working copy and wrong for the folder someone just picked
     - that is their data. This does the extraction and nothing else.
+
+    Several at once: decompression is mostly zlib, which releases the GIL, so threads
+    genuinely overlap rather than taking turns.
     """
     folder = Path(folder)
-    zips = [f for f in sorted(folder.glob("*.zip")) if f.is_file()]
-    # already unpacked ones are skipped anyway, so counting a batch by what is left to
-    # do is what makes "ten at a time" mean ten
-    todo = [z for z in zips
-            if not (z.with_suffix("").is_dir() and any(z.with_suffix("").iterdir()))]
-    if limit:
-        todo = todo[:limit]
-    zips = todo
+    todo = [z for z in sorted(folder.glob("*.zip"))
+            if z.is_file()
+            and not (z.with_suffix("").is_dir() and any(z.with_suffix("").iterdir()))]
 
-    def make(z):
-        def run(job):
-            import zipfile
-            dest = z.with_suffix("")
-            if dest.exists() and any(dest.iterdir()):
-                job.emit(f"{z.name}: {dest.name}/ is already there, leaving it alone")
-                return
-            try:
-                with zipfile.ZipFile(z) as zf:
-                    members = zf.namelist()
-                    # a zip can name ../../elsewhere; extracted blindly that writes
-                    # outside the folder the person chose
-                    for m in members:
-                        mp = Path(m)
-                        if mp.is_absolute() or ".." in mp.parts:
-                            raise RuntimeError(f"unsafe path in the archive: {m}")
-                    dest.mkdir(parents=True, exist_ok=True)
-                    zf.extractall(dest)
-                job.emit(f"{z.name}: {len(members)} entries -> {dest.name}/")
-            except Exception as e:
-                job.emit(f"{z.name}: FAILED - {type(e).__name__}: {e}")
-        return run
+    def one(z, job):
+        import zipfile
+        dest = z.with_suffix("")
+        try:
+            with zipfile.ZipFile(z) as zf:
+                members = zf.namelist()
+                # a zip can name ../../elsewhere; extracted blindly that writes outside
+                # the folder the person chose
+                for m in members:
+                    mp = Path(m)
+                    if mp.is_absolute() or ".." in mp.parts:
+                        raise RuntimeError(f"unsafe path in the archive: {m}")
+                dest.mkdir(parents=True, exist_ok=True)
+                zf.extractall(dest)
+            return f"{z.name}: {len(members)} entries -> {dest.name}/"
+        except Exception as e:
+            return f"{z.name}: FAILED - {type(e).__name__}: {e}"
 
-    steps = [(f"unzipping {z.name}", make(z)) for z in zips]
-    return Job("unzip", "", f"unzip {len(zips)} archive(s)", steps, queue_name="light")
+    def run(job):
+        from concurrent.futures import ThreadPoolExecutor
+        done = 0
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futures = [(z, pool.submit(one, z, job)) for z in todo]
+            # waited on in file order while they all run at once, so the log reads
+            # down the folder rather than in whatever order the threads finished
+            for z, fut in futures:
+                if job.cancelled:
+                    fut.cancel()
+                    continue
+                job.emit(fut.result())
+                done += 1
+                job.step_label = f"{done} of {len(todo)}"
+        job.emit(f"{done} of {len(todo)} archive(s) unpacked")
+
+    return Job("unzip", "", f"unzip {len(todo)} archive(s), {workers} at once",
+               [(f"unpacking {len(todo)} archive(s)", run)], queue_name="light")
 
 
 # --------------------------------------------------------------- series selection
@@ -2066,10 +2075,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not folder.is_dir():
                     return self._json({"error": f"not a folder: {folder}"}, 400)
                 try:
-                    limit = max(0, int(body.get("limit") or 0))
+                    workers = min(16, max(1, int(body.get("workers") or 4)))
                 except (TypeError, ValueError):
-                    limit = 0
-                return self._json({"job": submit(job_unzip(folder, limit)).id})
+                    workers = 4
+                return self._json({"job": submit(job_unzip(folder, workers)).id})
 
             if u.path == "/api/pick":
                 path, why = native_folder_dialog(body.get("start") or "")
