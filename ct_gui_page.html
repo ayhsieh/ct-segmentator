@@ -869,7 +869,9 @@ async function series(name, job, plan, cases) {
     <h1>${plan ? "Checking the scans" : "Which series?"}</h1>
     <div id="snote"></div>
     <div class="note amber" id="stally" style="display:none"></div>
-    <div id="csTop"></div>
+    <label class="ui meta" style="display:block;margin-bottom:8px">
+      <input type="checkbox" id="onlywait" style="margin-right:6px">
+      show only the ones that need a series chosen</label>
     <div id="cs" style="max-height:52vh;overflow:auto;border:1px solid var(--line);
       border-radius:10px;padding:10px 12px;background:var(--panel)"></div>
     <div class="row" style="position:sticky;bottom:0;background:var(--bg);
@@ -880,7 +882,6 @@ async function series(name, job, plan, cases) {
   document.getElementById("doneb").onclick = () => nav("project", name);
   const snote = document.getElementById("snote");
   const cs = document.getElementById("cs");
-  const csTop = document.getElementById("csTop");
 
   /* A placeholder per case up front, so a scan that takes a minute a case shows a list
      filling in rather than an empty screen. */
@@ -897,23 +898,15 @@ async function series(name, job, plan, cases) {
   const skipped = new Set();
   const blockers = new Set();
 
-  /* The ones still wanting an answer go to the top, so a long list does not have to be
-     scrolled through to find the three that matter. Reordered after every pick, not
-     only at the end, so a card leaves the queue the moment it is dealt with. */
-  const CATEGORY = {wait: 0, seen: 1, done: 2};
-  function categorise(cse) {
-    if (unresolved.has(cse)) return "wait";
-    if (skipped.has(cse)) return "done";
-    return slots[cse] && slots[cse].dataset.cat === "done" ? "done" : "seen";
+  /* A card is marked as wanting an answer when it is drawn, so the filter works while
+     the scan is still going rather than only once it has finished. */
+  const onlywait = document.getElementById("onlywait");
+  function applyFilter() {
+    for (const el of Object.values(slots))
+      if (el) el.hidden = onlywait.checked && el.dataset.wait !== "1";
   }
-  function reorder() {
-    const cards = Object.entries(slots).filter(([, el]) => el && el.isConnected);
-    cards.sort((a, b) => CATEGORY[categorise(a[0])] - CATEGORY[categorise(b[0])]
-                      || a[0].localeCompare(b[0]));
-    // the ones wanting an answer sit above the scrolling list, not merely first in it
-    for (const [cse, el] of cards)
-      (categorise(cse) === "wait" ? csTop : cs).append(el);   // append moves, not copies
-  }
+  onlywait.onchange = applyFilter;
+
   function retest() {
     const go = document.getElementById("go");
     if (go) {
@@ -929,7 +922,7 @@ async function series(name, job, plan, cases) {
         : "";
       tally.style.display = unresolved.size ? "" : "none";
     }
-    reorder();
+    applyFilter();
   }
   /* What the scan chose by itself, per case, so going ahead can record those choices
      and the screen genuinely does not come back for the same cases. */
@@ -1002,8 +995,10 @@ async function series(name, job, plan, cases) {
 
   function render(cse, r) {
     if (r.error) {
-      return $(`<div class="card"><h3>${esc(cse)}</h3>
+      const bad = $(`<div class="card"><h3>${esc(cse)}</h3>
         <div class="note warn">${esc(r.error)}</div></div>`);
+      bad.dataset.wait = "1";
+      return bad;
     }
     const badge = {cached:'<span class="pill on">already chosen</span>',
                    auto:'<span class="pill on">picked automatically</span>',
@@ -1016,6 +1011,7 @@ async function series(name, job, plan, cases) {
       <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
         <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
       <tbody></tbody></table></div>`);
+    if (r.decision === "manual" || r.decision === "none") card.dataset.wait = "1";
     if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
     const tb = card.querySelector("tbody");
     if (r.quick) {
@@ -1064,7 +1060,7 @@ async function series(name, job, plan, cases) {
           card.querySelector(".pill").outerHTML =
             '<span class="pill on">chosen by you</span>';
           delete autoPick[cse];          /* the user's pick is already written */
-          card.dataset.cat = "done";
+          card.dataset.wait = "";        /* answered: it leaves the filtered view */
           unresolved.delete(cse); retest();
           if (res.cleared_nifti)
             card.append($(`<div class="note amber">Removed the old converted image so
