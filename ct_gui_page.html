@@ -624,7 +624,9 @@ async function project(name) {
     const undo = pending(ev.currentTarget, "Queued…");
     try {
       const cs = [...document.querySelectorAll(".ck:checked")].map(i => i.value);
-      const {job} = await api("/api/scan", {project:name, cases:cs});
+      /* A case with a recorded choice is answered from that choice, as the command
+         line does. Re-read on its card reads the series again for that one. */
+      const {job} = await api("/api/scan", {project:name, cases:cs, quick:true});
       series(name, job, null, cs);
     } catch (e) { undo(); document.getElementById("runerr").append(err(e)); }
   };
@@ -1011,11 +1013,25 @@ async function series(name, job, plan, cases) {
     if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
     const tb = card.querySelector("tbody");
     if (r.quick) {
-      /* Answered from the recorded choice, so the series were never read and there is
-         no table to show - which is the point, and worth saying rather than leaving an
-         empty box. */
-      card.append($(`<div class="meta">series ${esc(r.chosen ? r.chosen.snum : "?")}
-        &mdash; ${esc((r.chosen && r.chosen.desc) || "chosen earlier")}</div>`));
+      /* Answered from the recorded choice, so the series were never read - which is
+         what makes this fast on a study already worked through. */
+      const line = $(`<div class="row"><span class="meta">series ${
+        esc(r.chosen ? r.chosen.snum : "?")} &mdash; ${
+        esc((r.chosen && r.chosen.desc) || "chosen earlier")}</span>
+        <button class="quiet reread">re-read the series</button></div>`);
+      line.querySelector(".reread").onclick = async (ev) => {
+        const undo = pending(ev.currentTarget, "Reading…");
+        try {
+          const {job} = await api("/api/scan",
+            {project:name, cases:[cse], quick:false});
+          const st = await follow(job, () => {});
+          const fresh = (st.results || {})[cse];
+          if (fresh) { const c2 = render(cse, fresh); card.replaceWith(c2);
+                       slots[cse] = c2; retest(); }
+          else undo();
+        } catch (e) { undo(); card.append(err(e)); }
+      };
+      card.append(line);
       card.querySelector("table").remove();
       return card;
     }
