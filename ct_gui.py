@@ -574,6 +574,7 @@ class Job:
 
 
 JOBS = {}
+_CACHE_LOCK = threading.Lock()
 JOB_ORDER = deque(maxlen=200)
 QUEUES = {"gpu": queue.Queue(), "light": queue.Queue()}
 LOCK = threading.Lock()
@@ -1090,15 +1091,22 @@ def write_pick(link_path, series_dir, snum, desc):
     that behavior ever changes. series_dir is stored absolute; many existing entries
     are relative and only resolve when the cwd happens to be the repo root.
     """
-    from segment_structures import load_cache, save_cache
+    from segment_structures import load_cache, CACHE_FILE
     link = Path(link_path)
     entry = {"snum": str(snum), "desc": desc,
              "series_dir": str(Path(series_dir).resolve())}
-    cache = load_cache()
-    before = cache.get(str(link.resolve())) or cache.get(str(link))
-    cache[str(link.resolve())] = entry
-    cache[str(link)] = entry
-    save_cache(cache)
+    # One writer at a time, and the file replaced rather than rewritten in place. The
+    # server is threaded and the page records a choice per case as the scan produces
+    # it, so two of these can land together; read-modify-write without this leaves one
+    # document written over the middle of another, and the cache will not parse.
+    with _CACHE_LOCK:
+        cache = load_cache()
+        before = cache.get(str(link.resolve())) or cache.get(str(link))
+        cache[str(link.resolve())] = entry
+        cache[str(link)] = entry
+        tmp = CACHE_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+        os.replace(tmp, CACHE_FILE)
     # whether this actually changes anything, so a choice that only confirms what was
     # already recorded does not throw away the conversion made from it
     changed = not before or before.get("series_dir") != entry["series_dir"] \
