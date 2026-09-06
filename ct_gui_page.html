@@ -328,7 +328,8 @@ async function newProject(preset, into) {
     const done = pending(btn, "Looking for cases…");
     found.innerHTML = "";
     try {
-      const d = await api("/api/detect?path=" + encodeURIComponent(cur));
+      const d = await api("/api/detect?path=" + encodeURIComponent(cur)
+        + (into ? "&project=" + encodeURIComponent(into) : ""));
       done();
       if (d.error) { found.append(err({message:d.error})); return; }
       if (!d.cases.length) {
@@ -377,8 +378,11 @@ async function newProject(preset, into) {
       const cl = document.getElementById("cl");
       for (const c of d.cases) {
         const r = $(`<label class="row" style="padding:4px 0">
-          <input type="checkbox" checked data-case='${esc(JSON.stringify(c))}'>
+          <input type="checkbox" ${c.duplicate ? "" : "checked"}
+                 data-case='${esc(JSON.stringify(c))}'>
           <span>${esc(c.case)}</span>
+          ${c.zip ? '<span class="pill">zip</span>' : ""}
+          ${c.duplicate ? '<span class="pill amber">already in this project</span>' : ""}
           ${c.note ? `<span class="pill amber">${esc(c.note)}</span>` : ""}
           </label>`);
         cl.append(r);

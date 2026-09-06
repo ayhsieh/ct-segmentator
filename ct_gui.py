@@ -362,6 +362,10 @@ def detect_cases(root):
         sr, note = series_root(d)
         out.append({"case": d.name, "path": str(d), "series_root": str(sr),
                     "note": note})
+    for z in sorted(root.glob("*.zip")):
+        out.append({"case": z.stem, "path": str(z), "zip": str(z),
+                    "series_root": "", "note": ""})
+
     if not out and has_dicom_anywhere(root):
         sr, note = series_root(root)
         out.append({"case": root.name, "path": str(root), "series_root": str(sr),
@@ -401,16 +405,29 @@ def import_case(dest, spec, mode):
     move changes where it is.
     """
     dest = Path(dest)
+    if spec.get("zip"):
+        import zipfile
+        try:
+            with zipfile.ZipFile(spec["zip"]) as zf:
+                if any(Path(m).is_absolute() or ".." in Path(m).parts
+                       for m in zf.namelist()):
+                    return False, "unsafe paths in the archive", ""
+                dest.mkdir(parents=True, exist_ok=True)
+                zf.extractall(dest)
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}", ""
+        return True, "", str(series_root(dest)[0])
+
     case_root = Path(spec.get("path") or spec["series_root"])
-    series_root = Path(spec["series_root"])
+    src_series = Path(spec["series_root"])
     if mode == "link":
-        ok, msg = make_link(dest, series_root)
-        return ok, msg, str(series_root)
+        ok, msg = make_link(dest, src_series)
+        return ok, msg, str(src_series)
 
     if dest.exists() or dest.is_symlink():
         return False, "something is already there", ""
     try:
-        rel = series_root.relative_to(case_root)      # before the folder moves
+        rel = src_series.relative_to(case_root)      # before the folder moves
     except ValueError:
         rel = Path(".")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1812,6 +1829,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(project_state(self._project(q)))
             if u.path == "/api/detect":
                 cases, err = detect_cases(q.get("path", ""))
+                # marked, not withheld: an exact name match is the project's own case
+                into = q.get("project", "")
+                pr = load_project(into) if into else None
+                have = {c["case"] for c in pr.get("cases", [])} if pr else set()
+                for c in cases:
+                    c["duplicate"] = c["case"] in have
                 return self._json({"cases": cases, "error": err,
                                    "zips": sorted(f.name for f in
                                                   Path(q.get("path", ".")).glob("*.zip"))
