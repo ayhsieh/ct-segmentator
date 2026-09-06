@@ -211,6 +211,7 @@ function fmtTime(s) {
 const ROUTES = {
   home:    ()  => home(),
   new:     (a) => newProject(a[0] || ""),
+  add:     (a) => newProject(a[1] || "", a[0]),
   project: (a) => project(a[0]),
   fossa:   (a) => fossa(a[0], a[1]),
   viewseg: (a) => viewseg(a[0], a[1], a[2]),
@@ -279,11 +280,12 @@ function err(e) {
 }
 
 /* ------------------------------------------------------- new project */
-async function newProject(preset) {
-  stopPoll(); crumb.textContent = "New project";
+async function newProject(preset, into) {
+  stopPoll(); crumb.textContent = into ? into + " · add cases" : "New project";
   view.innerHTML = "";
   view.append($(`<div>
-    <h1>${preset ? "Cases found" : "Point at your scans"}</h1>
+    <h1>${into ? (preset ? "Cases found" : "Add cases to " + esc(into))
+               : (preset ? "Cases found" : "Point at your scans")}</h1>
     <div class="row" style="margin-bottom:8px">
       <button ${preset ? 'class="ghost"' : ''} id="pick">
         ${preset ? "Change folder…" : "Choose folder…"}</button>
@@ -358,11 +360,12 @@ async function newProject(preset) {
             </span></label>
         </div>
         <div class="row" style="margin-top:14px">
-          <input type="text" id="pname" placeholder="Project name"
+          ${into ? "" : `<input type="text" id="pname" placeholder="Project name"
                  style="max-width:280px" value="${esc(cur.split(/[\\\\/]/).pop())}">
           <input type="text" id="pdesc" placeholder="What is this? (optional)"
-                 style="max-width:340px">
-          <button id="create">Create project</button></div>
+                 style="max-width:340px">`}
+          <button id="create">${into ? "Add to " + esc(into) : "Create project"}</button>
+          </div>
         <div id="cerr"></div></div>`);
       found.append(box);
       if (d.zips && d.zips.length) {
@@ -388,6 +391,17 @@ async function newProject(preset) {
           .map(i => JSON.parse(i.dataset.case));
         const cerr = document.getElementById("cerr"); cerr.innerHTML = "";
         try {
+          if (into) {
+            const res = await api("/api/project/add", {project: into, cases, mode});
+            const notes = [];
+            if (res.already_there.length)
+              notes.push(res.already_there.length + " were already in the project: "
+                         + res.already_there.join(", "));
+            if (res.failed.length) notes.push(res.failed.join("\n"));
+            if (notes.length) alert(notes.join("\n\n"));
+            nav("project", into);
+            return;
+          }
           const res = await api("/api/project/create", {
             name: document.getElementById("pname").value, source: cur, cases, mode,
             description: document.getElementById("pdesc").value});
@@ -409,7 +423,7 @@ async function newProject(preset) {
       undo();
       if (r.unavailable) return typePath(r.unavailable);
       if (!r.path) return;                       /* cancelled - say nothing */
-      nav("new", r.path);
+      into ? nav("add", into, r.path) : nav("new", r.path);
     } catch (e) { undo(); pickerr.append(err(e)); }
   };
 
@@ -424,7 +438,7 @@ async function newProject(preset) {
     pickerr.append(box);
     box.querySelector("#usepath").onclick = () => {
       const v = box.querySelector("#ppath").value.trim();
-      if (v) nav("new", v);
+      if (v) into ? nav("add", into, v) : nav("new", v);
     };
   }
 
@@ -457,6 +471,8 @@ async function project(name) {
       <span class="mono">${esc(st.source || "")}</span></p>
     ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
       folder that is not there right now - is the drive connected?</div>` : ""}
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost" id="addcases">Add cases</button></div>
     <div id="cases"></div>
     <h2>Segment</h2>
     <div class="row" style="margin-bottom:10px">
@@ -515,6 +531,16 @@ async function project(name) {
 
   const doneTasks = new Set();
   st.case_status.forEach(c => c.tasks.forEach(x => doneTasks.add(x)));
+
+  document.getElementById("addcases").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Choose a folder…");
+    try {
+      const r = await api("/api/pick", {});
+      undo();
+      if (r.unavailable || !r.path) return nav("add", name);
+      nav("add", name, r.path);
+    } catch (e) { undo(); nav("add", name); }
+  };
 
   const cases = document.getElementById("cases");
   const tbl = $(`<table><thead><tr>

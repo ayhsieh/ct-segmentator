@@ -1944,6 +1944,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"name": name, "linked": made, "failed": failed,
                                    "mode": mode})
 
+            if u.path == "/api/project/add":
+                name = self._project(body)
+                pr = load_project(name)
+                mode = body.get("mode") or pr.get("mode", "link")
+                if mode not in ("link", "move"):
+                    return self._json({"error": f"unknown mode: {mode!r}"}, 400)
+                have = {c["case"] for c in pr.get("cases", [])}
+                added, failed, skipped = [], [], []
+                for c in body.get("cases") or []:
+                    if c["case"] in have:
+                        skipped.append(c["case"])       # a name is a folder here
+                        continue
+                    dest = PROJECTS / name / c["case"]
+                    ok, msg, sr = import_case(dest, c, mode)
+                    if ok:
+                        added.append({"case": c["case"],
+                                      "path": str(dest) if mode == "move" else c["path"],
+                                      "series_root": sr})
+                    else:
+                        failed.append(f"{c['case']}: {msg}")
+                if added:
+                    pr["cases"] = pr.get("cases", []) + added
+                    save_project(pr)
+                return self._json({"added": [c["case"] for c in added],
+                                   "already_there": skipped, "failed": failed,
+                                   "mode": mode})
+
             if u.path == "/api/project/skip":
                 # A set-aside case, not a deleted one: the folder, the link and every
                 # output stay exactly where they are, and clearing the flag is the
