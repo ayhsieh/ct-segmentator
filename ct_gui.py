@@ -1095,10 +1095,15 @@ def write_pick(link_path, series_dir, snum, desc):
     entry = {"snum": str(snum), "desc": desc,
              "series_dir": str(Path(series_dir).resolve())}
     cache = load_cache()
+    before = cache.get(str(link.resolve())) or cache.get(str(link))
     cache[str(link.resolve())] = entry
     cache[str(link)] = entry
     save_cache(cache)
-    return entry
+    # whether this actually changes anything, so a choice that only confirms what was
+    # already recorded does not throw away the conversion made from it
+    changed = not before or before.get("series_dir") != entry["series_dir"] \
+        or str(before.get("snum")) != entry["snum"]
+    return entry, changed
 
 
 def clear_converted(group, case):
@@ -2078,9 +2083,9 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/series/pick":
                 name = self._project(body)
                 case = body["case"]
-                entry = write_pick(PROJECTS / name / case, body["series_dir"],
-                                   body["snum"], body.get("desc", ""))
-                cleared = clear_converted(name, case)
+                entry, changed = write_pick(PROJECTS / name / case, body["series_dir"],
+                                            body["snum"], body.get("desc", ""))
+                cleared = clear_converted(name, case) if changed else 0
                 return self._json({"saved": entry, "cleared_nifti": cleared})
 
             if u.path == "/api/pick":

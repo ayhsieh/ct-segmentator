@@ -961,6 +961,15 @@ async function series(name, job, plan, cases) {
       if (slots[cse]) { slots[cse].replaceWith(card); slots[cse] = card; }
       else cs.append(card);
       card.dataset.done = "1";
+      /* Recorded as soon as it is worked out, not when the run starts: the reading is
+         the expensive part, and losing it because the page was closed means doing it
+         all again. Reversible from the card. */
+      if (r.decision === "auto" && r.chosen) {
+        delete autoPick[cse];
+        api("/api/series/pick", {project:name, case:cse, snum:r.chosen.snum,
+                                 series_dir:r.chosen.series_dir, desc:r.chosen.desc})
+          .catch(() => { autoPick[cse] = r.chosen; });   // fall back to saving at launch
+      }
     }
     retest();
   });
