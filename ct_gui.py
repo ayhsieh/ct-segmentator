@@ -963,8 +963,10 @@ AUTO_MIN_SCORE, AUTO_MIN_GAP = 20, 15       # segment_structures.py:467-468
 def scan_folder(path, quick=False):
     """Run inside the --scan child. Reuses the pipeline's own scoring so the GUI can
     never disagree with what the CLI would have chosen."""
-    from segment_structures import (get_series, get_series_metadata, score_series,
-                                    load_cache, resolve_from_cache)
+    # ct_paths, not segment_structures: answering from a recorded choice needs no
+    # scoring, and importing the pipeline would load torch - seconds, and a few hundred
+    # megabytes of CUDA DLLs that Windows can refuse outright when commit is short.
+    from ct_paths import load_cache, resolve_from_cache
     path = Path(path)
     key = str(path.resolve())
     cache = load_cache()
@@ -983,6 +985,7 @@ def scan_folder(path, quick=False):
         return {"path": str(path), "key": key, "decision": "cached", "chosen": cached,
                 "series": [], "quick": True}
 
+    from segment_structures import get_series, get_series_metadata, score_series
     series_map, _ = get_series(path)
     rows = []
     for uid, flist in series_map.items():

@@ -13,7 +13,8 @@ from collections import defaultdict
 
 # Defined in ct_paths so that a program which only reads results - produce_table, the
 # CSV builders - can find them without importing this module and, through it, torch.
-from ct_paths import DATA_ROOT, group_dir, nifti_dir_for, seg_dir_for   # noqa: F401
+from ct_paths import (DATA_ROOT, group_dir, nifti_dir_for, seg_dir_for,  # noqa: F401
+                      CACHE_FILE, load_cache, save_cache, resolve_from_cache)
 
 import pydicom
 import dicom2nifti
@@ -27,9 +28,6 @@ from totalsegmentator.nifti_ext_header import load_multilabel_nifti
 dicom2nifti_settings.disable_validate_orthogonal()
 dicom2nifti_settings.disable_validate_slice_increment()
 dicom2nifti_settings.disable_validate_multiframe_implicit()
-
-CACHE_FILE = Path(".series_selection_cache.json")
-
 
 # Every task TotalSegmentator accepts for -ta, split the way it splits them itself:
 # the ones below call show_license_info() in totalsegmentator/python_api.py and the
@@ -102,18 +100,6 @@ SOFT_KERNELS = ["soft", "standard", "b30", "b31", "b40", "h31", "h30", "j30", "j
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
-
-def load_cache():
-    if CACHE_FILE.exists():
-        with open(CACHE_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def save_cache(cache):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=2)
-
 
 # ---------------------------------------------------------------------------
 # Filename / DICOM helpers
@@ -426,20 +412,6 @@ def prompt_series_selection(dicom_folder, scored_series, folder_key, cache):
                 print(f"  Please enter a number between 1 and {len(scored_series)}, or -1 to skip.")
         except ValueError:
             print("  Invalid input, please enter a number.")
-
-
-def resolve_from_cache(entry, dicom_folder):
-    """Try to resolve a work item from a cache entry (new dict format).
-    Returns (files, desc, snum) or (None, None, None)."""
-    if not isinstance(entry, dict) or not entry.get("series_dir"):
-        return None, None, None
-    series_dir = Path(entry["series_dir"])
-    if not series_dir.is_dir():
-        return None, None, None
-    files = [str(f) for f in series_dir.iterdir() if f.is_file()]
-    if not files:
-        return None, None, None
-    return files, entry.get("desc", ""), entry["snum"]
 
 
 def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=False):

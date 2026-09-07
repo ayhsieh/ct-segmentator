@@ -1,13 +1,15 @@
-"""Where a study group's folders live.
+"""Where a study group's folders live, and which series was chosen for a case.
 
-Its own module because these three functions are all that a program needs in order to
-find results on disk, and importing them from segment_structures drags in
-totalsegmentator and torch - seconds on a warm machine and far worse on a cold one.
-Reading a folder of finished results should not load a deep learning framework.
+Its own module because this is all a program needs in order to find results on disk or
+answer from a recorded choice, and importing it from segment_structures drags in
+totalsegmentator and torch - seconds on a warm machine, far worse on a cold one, and
+several hundred megabytes of DLLs that can fail to load when Windows is short of
+commit. Reading a folder of finished results should not load a deep learning framework.
 
-segment_structures re-exports these, so `from segment_structures import seg_dir_for`
-keeps working and there is only one definition of any of them.
+segment_structures re-exports all of it, so `from segment_structures import seg_dir_for`
+keeps working and there is only one definition of anything.
 """
+import json
 import os
 from pathlib import Path
 
@@ -39,3 +41,32 @@ def nifti_dir_for(group):
 def seg_dir_for(group):
     """Directory under `<group>/total_segmentor_results_<group>/` for a study group."""
     return group_dir(group) / f"total_segmentor_results_{group}"
+
+
+CACHE_FILE = Path(".series_selection_cache.json")
+
+
+def load_cache():
+    if CACHE_FILE.exists():
+        with open(CACHE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_cache(cache):
+    with open(CACHE_FILE, "w") as f:
+        json.dump(cache, f, indent=2)
+
+
+def resolve_from_cache(entry, dicom_folder):
+    """Try to resolve a work item from a cache entry (new dict format).
+    Returns (files, desc, snum) or (None, None, None)."""
+    if not isinstance(entry, dict) or not entry.get("series_dir"):
+        return None, None, None
+    series_dir = Path(entry["series_dir"])
+    if not series_dir.is_dir():
+        return None, None, None
+    files = [str(f) for f in series_dir.iterdir() if f.is_file()]
+    if not files:
+        return None, None, None
+    return files, entry.get("desc", ""), entry["snum"]
