@@ -1030,6 +1030,7 @@ async function series(name, job, plan, cases) {
     if (r.quick) {
       /* Answered from the recorded choice, so the series were never read - which is
          what makes this fast on a study already worked through. */
+      wireSkip(card, cse);
       const line = $(`<div class="row"><span class="meta">series ${
         esc(r.chosen ? r.chosen.snum : "?")} &mdash; ${
         esc((r.chosen && r.chosen.desc) || "chosen earlier")}</span>
@@ -1086,17 +1087,26 @@ async function series(name, job, plan, cases) {
     /* A case whose series cannot be told apart, or that has none worth using, would
        otherwise hold up every other case in the run. Setting it aside is recorded on
        the project, not on the scan, so it survives and so it can be undone. */
+    wireSkip(card, cse);
+    return card;
+  }
+
+  /* Set aside settles the case as much as choosing a series does, so it leaves the
+     filtered view too - a ticked card sitting in "only the ones that need a series"
+     reads as unfinished work. */
+  function wireSkip(card, cse) {
     const sk = card.querySelector(".skipck");
+    if (!sk) return;
     sk.checked = !!skipped.has(cse);
+    if (sk.checked) card.dataset.wait = "";
     sk.onchange = async () => {
       skipped[sk.checked ? "add" : "delete"](cse);
-      if (sk.checked) unresolved.delete(cse);
-      else if (blockers.has(cse)) unresolved.add(cse);
+      if (sk.checked) { unresolved.delete(cse); card.dataset.wait = ""; }
+      else if (blockers.has(cse)) { unresolved.add(cse); card.dataset.wait = "1"; }
       retest();
       try { await api("/api/project/skip", {project:name, case:cse, skip:sk.checked}); }
       catch (e) { card.append(err(e)); }
     };
-    return card;
   }
 
   /* Read straight off the DICOMs. Choosing a series is a question about what the
