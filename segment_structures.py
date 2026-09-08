@@ -944,6 +944,11 @@ def main():
                     device=args.device,
                     statistics=False,    # we compute our own below
                 )
+                # --roi-subset has been a parser argument all along and was never read,
+                # so every "total --roi-subset brain" run segmented all 117 whole-body
+                # structures on a head CT and threw 116 of them away.
+                if args.roi_subset:
+                    kwargs["roi_subset"] = args.roi_subset
                 if args.license_number:
                     kwargs["license_number"] = args.license_number
 

@@ -12,7 +12,12 @@ what segment_structures.py already wrote, so it is safe to run any time.
 
 --select takes a JSON file naming what to keep: {"task": ["structure", ...]}, where an
 empty list means the whole task, and "_scan" covers the series and slice-count columns.
-Without it the table holds everything, as it always did.
+
+Without it the table holds everything except the whole body. The "total" task is run
+here only for its brain mask, but early cases were segmented before that was true and
+their stats files hold all 117 structures, spleen to sacrum. Carrying those would give
+a table where the body columns are filled in for the cases that happen to be old, so
+total contributes its brain and nothing else unless --select asks for more.
 """
 import argparse
 import json
@@ -43,7 +48,7 @@ def main():
 
     def wanted(task, structure=None):
         if keep is None:
-            return True
+            return task != "total" or structure in (None, "brain")
         if task not in keep:
             return False
         return structure is None or not keep[task] or structure in keep[task]
