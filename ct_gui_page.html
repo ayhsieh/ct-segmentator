@@ -195,6 +195,7 @@ const $ = (h) => { const t = document.createElement("template");
                    t.innerHTML = h.trim(); return t.content.firstElementChild; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const SEP_TAIL = /[\\/][^\\/]*$/;   /* the last path segment, either slash */
 const view = document.getElementById("view");
 const crumb = document.getElementById("crumb");
 let POLL = null;
@@ -320,23 +321,31 @@ async function newProject(preset, into) {
     <div class="row" style="margin-bottom:8px">
       <button ${preset ? 'class="ghost"' : ''} id="pick">
         ${preset ? "Change folder…" : "Choose folder…"}</button>
+      <button class="ghost" id="pickzip">Choose zip files…</button>
     </div>
     <div id="pickerr"></div>
     <div id="found"></div></div>`));
   let cur = null;
+  /* Archives chosen one by one rather than a folder to scan. Held here rather than in
+     the hash: a hundred file paths do not belong in a URL, and this screen is one step
+     on the way to a project, not a place to come back to. */
+  let zipsel = null;
   const found = document.getElementById("found");
+  const home = () => zipsel ? zipsel[0].replace(SEP_TAIL, "") : cur;
 
   async function detect(btn) {
     const done = pending(btn, "Looking for cases…");
     found.innerHTML = "";
     try {
-      const d = await api("/api/detect?path=" + encodeURIComponent(cur)
+      const d = await api("/api/detect?"
+        + (zipsel ? "zips=" + encodeURIComponent(zipsel.join(String.fromCharCode(10)))
+                  : "path=" + encodeURIComponent(cur))
         + (into ? "&project=" + encodeURIComponent(into) : ""));
       done();
       if (d.error) { found.append(err({message:d.error})); return; }
       if (!d.cases.length) {
         found.append($(`<div class="note warn">No DICOM files or archives found under
-          ${esc(cur)}. Open a subfolder and try again.</div>`));
+          ${esc(home())}. Open a subfolder and try again.</div>`));
         return;
       }
       const nzip = d.cases.filter(c => c.zip).length;
@@ -345,17 +354,18 @@ async function newProject(preset, into) {
         <div class="card" id="cl" style="max-height:290px;overflow:auto"></div>
         <div class="stack" style="margin-top:16px">
           <label style="display:flex;gap:9px;align-items:flex-start">
-            <input type="radio" name="mode" value="link" checked>
-            <span><b class="ui">Link</b>
-              <div class="meta">The scans stay in
-                <span class="mono">${esc(cur)}</span>. The project points at them.</div>
+            <input type="radio" name="mode" value="move" checked>
+            <span><b class="ui">Move</b>
+              <div class="meta">The scans are moved into the project's
+                <span class="mono">scans</span> folder and are no longer in
+                <span class="mono">${esc(home())}</span>. The project becomes the only
+                copy, and everything about a study sits in one place.</div>
             </span></label>
           <label style="display:flex;gap:9px;align-items:flex-start">
-            <input type="radio" name="mode" value="move">
-            <span><b class="ui">Move</b>
-              <div class="meta">The scan folders are moved into the project and are no
-                longer in <span class="mono">${esc(cur)}</span>. The project becomes the
-                only copy.</div>
+            <input type="radio" name="mode" value="link">
+            <span><b class="ui">Link</b>
+              <div class="meta">The scans stay in
+                <span class="mono">${esc(home())}</span>. The project points at them.</div>
             </span></label>
         </div>
         ${nzip ? `<div class="row" style="margin-top:12px">
@@ -366,7 +376,7 @@ async function newProject(preset, into) {
             value="4" style="width:64px;margin-right:6px">at once</label></div>` : ""}
         <div class="row" style="margin-top:14px">
           ${into ? "" : `<input type="text" id="pname" placeholder="Project name"
-                 style="max-width:280px" value="${esc(cur.split(/[\\/]/).pop())}">
+                 style="max-width:280px" value="${esc(home().split(/[\\/]/).pop())}">
           <input type="text" id="pdesc" placeholder="What is this? (optional)"
                  style="max-width:340px">`}
           <button id="create">${into ? "Add to " + esc(into) : "Create project"}</button>
@@ -398,7 +408,7 @@ async function newProject(preset, into) {
         try {
           const r = into
             ? await api("/api/project/add", Object.assign({project: into}, body))
-            : await api("/api/project/create", Object.assign({source: cur,
+            : await api("/api/project/create", Object.assign({source: home(),
                 name: document.getElementById("pname").value,
                 description: document.getElementById("pdesc").value}, body));
           /* the work itself is a job now: show it happening rather than holding the
@@ -430,7 +440,25 @@ async function newProject(preset, into) {
       undo();
       if (r.unavailable) return typePath(r.unavailable);
       if (!r.path) return;                       /* cancelled - say nothing */
+      zipsel = null;
       into ? nav("add", into, r.path) : nav("new", r.path);
+    } catch (e) { undo(); pickerr.append(err(e)); }
+  };
+
+  /* One archive is one case, so several can be picked at once and each becomes its own
+     case named after its file. */
+  document.getElementById("pickzip").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Choose archives…");
+    pickerr.innerHTML = "";
+    try {
+      const r = await api("/api/pick", {kind: "zips", start: home() || ""});
+      undo();
+      if (r.unavailable) return typePath(r.unavailable);
+      if (!r.zips || !r.zips.length) return;     /* cancelled - say nothing */
+      zipsel = r.zips;
+      pickerr.append($(`<div class="note">${r.zips.length} archive${
+        r.zips.length === 1 ? "" : "s"} chosen.</div>`));
+      detect(null);
     } catch (e) { undo(); pickerr.append(err(e)); }
   };
 
@@ -479,7 +507,11 @@ async function project(name) {
     ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
       folder that is not there right now - is the drive connected?</div>` : ""}
     <div class="row" style="margin-bottom:10px">
-      <button class="ghost" id="addcases">Add cases</button></div>
+      <button class="ghost" id="addcases">Add cases</button>
+      <button class="quiet" id="scanfolder"
+        title="open the folder holding this project's DICOMs">view files in folder</button>
+      </div>
+    <div id="sferr"></div>
     <div id="cases"></div>
     <div class="meta" id="cksum" style="margin-bottom:18px"></div>
     <h2>Segment</h2>
@@ -548,6 +580,14 @@ async function project(name) {
       if (r.unavailable || !r.path) return nav("add", name);
       nav("add", name, r.path);
     } catch (e) { undo(); nav("add", name); }
+  };
+
+  document.getElementById("scanfolder").onclick = async (ev) => {
+    const undo = pending(ev.currentTarget, "Opening…");
+    const out = document.getElementById("sferr"); out.innerHTML = "";
+    try { await api("/api/reveal", {project: name, what: "scans"}); }
+    catch (e) { out.append(err(e)); }
+    finally { undo(); }
   };
 
   const cases = document.getElementById("cases");

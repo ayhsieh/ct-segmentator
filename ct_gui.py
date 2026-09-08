@@ -182,26 +182,44 @@ if sys.platform == "darwin":
     r.after(700, _activate)
 
 r.attributes("-topmost", True)      # otherwise it opens behind the browser window
-p = tkinter.filedialog.askdirectory(title="Choose the folder that holds your scans",
-                                    initialdir=(sys.argv[1] or None), mustexist=True)
+if len(sys.argv) > 2 and sys.argv[2] == "zips":
+    got = tkinter.filedialog.askopenfilenames(
+        title="Choose the DICOM archives to bring in",
+        initialdir=(sys.argv[1] or None),
+        filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
+    p = chr(10).join(got or ())
+else:
+    p = tkinter.filedialog.askdirectory(title="Choose the folder that holds your scans",
+                                        initialdir=(sys.argv[1] or None), mustexist=True)
 r.destroy()
 sys.stdout.write(p or "")
 """
 
 
-def native_folder_dialog(start=""):
-    """Return (path, unavailable_reason). An empty path with no reason means cancelled."""
+def _run_picker(start, kind):
+    """Return (stdout, unavailable_reason). Empty output and no reason is a cancel."""
     try:
-        r = subprocess.run([sys.executable, "-c", _PICKER, str(start)],
+        r = subprocess.run([sys.executable, "-c", _PICKER, str(start), kind],
                            capture_output=True, text=True, timeout=600)
     except Exception as e:
         return "", str(e)
     if r.returncode != 0:
         # no display, or a python built without Tk - the page asks for a typed path
         tail = (r.stderr or "").strip().splitlines()
-        return "", (tail[-1] if tail else "no folder dialog available here")
-    p = r.stdout.strip()
-    return (p if p and Path(p).is_dir() else ""), ""
+        return "", (tail[-1] if tail else "no file dialog available here")
+    return r.stdout.strip(), ""
+
+
+def native_folder_dialog(start=""):
+    out, why = _run_picker(start, "folder")
+    return (out if out and Path(out).is_dir() else ""), why
+
+
+def native_zip_dialog(start=""):
+    """The archives someone picked, several at a time. One zip is one case."""
+    out, why = _run_picker(start, "zips")
+    return [p for p in out.splitlines() if p.lower().endswith(".zip")
+            and Path(p).is_file()], why
 
 
 def reveal(target):
@@ -368,6 +386,25 @@ def detect_cases(root):
     return out, ""
 
 
+def zip_cases(paths):
+    """One case per archive, for archives chosen by hand rather than found in a folder.
+
+    Nothing is opened here: a zip's name is its case name, and what is inside is only
+    read when it is unpacked into the project."""
+    out = []
+    for z in paths:
+        f = Path(z)
+        if not f.is_file() or f.suffix.lower() != ".zip":
+            return [], f"not a zip file: {f}"
+        out.append({"case": f.stem, "path": str(f), "zip": str(f),
+                    "series_root": "", "note": ""})
+    seen = {}
+    for c in out:
+        seen.setdefault(c["case"], []).append(c)
+    dup = [n for n, v in seen.items() if len(v) > 1]
+    return out, (f"two archives are both named {dup[0]}.zip" if dup else "")
+
+
 # ------------------------------------------------------------------------- links
 def make_link(link, target):
     """A junction (Windows) or symlink (POSIX) so the pipeline sees the DICOMs in
@@ -449,6 +486,26 @@ def drop_link(link):
 
 
 # ------------------------------------------------------------------- the registry
+SCANS = "scans"
+
+
+def scans_root(project):
+    """The folder inside a project that holds its case folders.
+
+    New projects keep them in scans/, so the project folder shows four things - the
+    scans, the converted NIfTI, the results and the log - instead of the scans mixed in
+    among them. Projects made before that keep their old shape: the marker is simply
+    whether scans/ is there, so nothing has to be migrated or recorded.
+    """
+    d = PROJECTS / project / SCANS
+    return d if d.is_dir() else PROJECTS / project
+
+
+def case_dir(project, case):
+    """Where one case's DICOMs are, whichever shape the project has."""
+    return scans_root(project) / case
+
+
 def project_file(name):
     return PROJECTS / name / "project.json"
 
@@ -514,7 +571,7 @@ def project_state(name):
     cases = []
     for c in pr.get("cases", []):
         st = case_status(name, c["case"])
-        link = PROJECTS / name / c["case"]
+        link = case_dir(name, c["case"])
         st["online"] = link.exists()
         st["source"] = c.get("series_root", c.get("path", ""))
         st["skipped"] = c["case"] in set(pr.get("skipped", []))
@@ -696,7 +753,7 @@ def job_segment(project, cases, tasks, device, license_no, force):
     steps = []
     for case in cases:
         for task in tasks:
-            argv = PY + ["segment_structures.py", str(PROJECTS / project / case),
+            argv = PY + ["segment_structures.py", str(case_dir(project, case)),
                          "--group-name", project, "--task", task,
                          "--skip-planning", "--device", device]
             if force:
@@ -732,7 +789,7 @@ def job_analysis(project, kind, cases, device, license_no=""):
         for task, extra, proof in PREREQS:
             if list((seg / case).glob(proof)):
                 continue
-            argv = PY + ["segment_structures.py", str(PROJECTS / project / case),
+            argv = PY + ["segment_structures.py", str(case_dir(project, case)),
                          "--group-name", project, "--task", task,
                          "--skip-planning", "--device", device] + extra
             if license_no and task in LICENSED_TASKS:
@@ -807,7 +864,7 @@ def job_scan(project, cases, quick=False):
         # --quick before --scan: --scan takes the rest of the line, so a flag after it
         # is read as a path
         argv = PY + ["ct_gui.py"] + (["--quick"] if quick else []) + ["--scan"]
-        argv += [str(PROJECTS / project / c) for c in cases]
+        argv += [str(case_dir(project, c)) for c in cases]
         proc = subprocess.Popen(argv, cwd=str(APP), env=child_env(),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, text=True, bufsize=1,
@@ -864,6 +921,11 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
         have.add(c["case"])
         todo.append(c)
     zips = [c for c in todo if c.get("zip")]
+    # A new project gets the scans/ shape; an old one keeps whatever it has, so adding
+    # to it puts the case where its other cases already are.
+    if not into:
+        (PROJECTS / name / SCANS).mkdir(parents=True, exist_ok=True)
+    root = scans_root(name)
 
     def run(job):
         from concurrent.futures import ThreadPoolExecutor
@@ -872,7 +934,7 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
             job.step_label = f"unpacking {len(zips)} archive(s)"
 
             def unpack(c):
-                dest = PROJECTS / name / c["case"]
+                dest = root / c["case"]
                 ok, msg, sr = import_case(dest, c, mode)
                 if ok and delete_zips:
                     try:
@@ -898,7 +960,7 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
                 break
             if c["case"] in results:
                 continue
-            dest = PROJECTS / name / c["case"]
+            dest = root / c["case"]
             ok, msg, sr = import_case(dest, c, mode)
             results[c["case"]] = (ok, msg, sr)
             job.emit(f"{c['case']}: {'moved' if mode == 'move' else 'linked'}"
@@ -909,7 +971,7 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
             ok, msg, sr = results.get(c["case"], (False, "cancelled", ""))
             if ok:
                 cases.append({"case": c["case"],
-                              "path": str(PROJECTS / name / c["case"])
+                              "path": str(root / c["case"])
                               if (mode == "move" or c.get("zip")) else c["path"],
                               "series_root": sr})
             else:
@@ -1010,7 +1072,7 @@ def convert_case(group, case):
     from segment_structures import (get_series, get_series_metadata, score_series,
                                     sanitize_filename)
     import dicom2nifti
-    link = PROJECTS / group / case
+    link = case_dir(group, case)
     if not link.exists():
         raise RuntimeError(f"{case}: the source folder is not there")
 
@@ -1611,7 +1673,7 @@ def _series_files(series_dir):
 def series_under_case(project, case, series_dir):
     """The series folder, checked to be inside that case. A path from a query string is
     not a permission: without this the route would render any DICOM on the disk."""
-    link = (PROJECTS / project / case).resolve()
+    link = case_dir(project, case).resolve()
     d = Path(series_dir).resolve()
     if d != link and link not in d.parents:
         raise RuntimeError("that folder is not part of this case")
@@ -1888,7 +1950,12 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/project":
                 return self._json(project_state(self._project(q)))
             if u.path == "/api/detect":
-                cases, err = detect_cases(q.get("path", ""))
+                # zips=... : archives picked one by one rather than a folder to scan
+                picked = [z for z in (q.get("zips") or "").splitlines() if z.strip()]
+                if picked:
+                    cases, err = zip_cases(picked)
+                else:
+                    cases, err = detect_cases(q.get("path", ""))
                 # marked, not withheld: an exact name match is the project's own case
                 into = q.get("project", "")
                 pr = load_project(into) if into else None
@@ -2003,9 +2070,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "letters, numbers, spaces, - . _ only"}, 400)
                 if load_project(name):
                     return self._json({"error": "a project with that name exists"}, 400)
-                src = Path(body.get("source", ""))
-                if not src.is_dir():
-                    return self._json({"error": f"not a folder: {src}"}, 400)
+                chosen = body.get("cases") or []
+                if all(c.get("zip") for c in chosen) and chosen:
+                    # picked archive by archive; the source recorded is where they came
+                    # from, which is only a note once they have been moved in
+                    try:
+                        src = Path(os.path.commonpath([c["zip"] for c in chosen]))
+                    except ValueError:
+                        src = Path(chosen[0]["zip"]).parent
+                    if src.is_file():
+                        src = src.parent
+                else:
+                    src = Path(body.get("source", ""))
+                    if not src.is_dir():
+                        return self._json({"error": f"not a folder: {src}"}, 400)
                 mode = body.get("mode", "link")
                 if mode not in ("link", "move"):
                     return self._json({"error": f"unknown mode: {mode!r}"}, 400)
@@ -2060,7 +2138,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "deletes the DICOMs.",
                                        "needs_confirm": True}, 409)
                 for c in pr.get("cases", []):
-                    drop_link(PROJECTS / name / c["case"])
+                    drop_link(case_dir(name, c["case"]))
                 shutil.rmtree(PROJECTS / name, ignore_errors=True)
                 return self._json({"deleted": name})
 
@@ -2081,17 +2159,23 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/series/pick":
                 name = self._project(body)
                 case = body["case"]
-                entry, changed = write_pick(PROJECTS / name / case, body["series_dir"],
+                entry, changed = write_pick(case_dir(name, case), body["series_dir"],
                                             body["snum"], body.get("desc", ""))
                 cleared = clear_converted(name, case) if changed else 0
                 return self._json({"saved": entry, "cleared_nifti": cleared})
 
             if u.path == "/api/pick":
-                path, why = native_folder_dialog(body.get("start") or "")
+                start = body.get("start") or ""
+                if body.get("kind") == "zips":
+                    zips, why = native_zip_dialog(start)
+                    return self._json({"zips": zips, "unavailable": why})
+                path, why = native_folder_dialog(start)
                 return self._json({"path": path, "unavailable": why})
 
             if u.path == "/api/reveal":
                 name = self._project(body)
+                if body.get("what") == "scans":
+                    return self._json({"opened": reveal(scans_root(name))})
                 base = seg_dir_for(name)
                 case, f = body.get("case") or "", body.get("file") or ""
                 target = base / case / f if case else base / f
