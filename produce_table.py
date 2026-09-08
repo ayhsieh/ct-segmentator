@@ -1,11 +1,17 @@
 #!/usr/bin/env python
 """
-One wide CSV row per case: every structure volume from every task that has been run.
+One wide CSV row per case: every number any part of the pipeline has worked out.
 
-Reads each case's <task>.stats.json files under the group's results folder and pivots
-them into columns named <task>_<structure>_volume, plus the series number/name and
-slice count read from the converted NIfTI. Nothing is recomputed - this only reads
-what segment_structures.py already wrote, so it is safe to run any time.
+Reads each case's stats files under the group's results folder and pivots them into
+columns. Three kinds of file, three shapes:
+
+  <task>.stats.json     a volume per structure -> <task>_<structure>_volume
+  brain_icv.stats.json  brain and intracranial volume -> brain_icv_<name>
+  *fossae_simple.*.json the three fossa compartments -> fossae_<compartment>_<name>
+
+plus the series number/name and slice count read from the converted NIfTI. Nothing is
+recomputed - this only reads what has already been written, so it is safe to run any
+time, and it is the only thing that writes a table.
 
     python produce_table.py --group fossa
     python produce_table.py --group fossa --out fossa_structure_volumes_ml.csv
@@ -24,14 +30,52 @@ import json
 import os
 import pathlib
 
-import nibabel as nib
-import pandas as pd
-
 from ct_dates import study_date
 from ct_paths import seg_dir_for, nifti_dir_for
 
 
+# Everything millilitres, so any two columns can be read against each other. The unit
+# is said once, in the file's name, rather than in every heading.
+BRAIN_ICV_KEYS = ["brain_ml", "icv_ml", "removed_from_brain_ml",
+                  "brain_clipped_to_icv_ml"]
+
+
+def read_stats(task, d):
+    """(task, column) and value for every number in one stats file.
+
+    The task a column is filed under is not always the file's name: a fossa file is
+    named after its case, and a task file's own name is the task. Yielding the pair
+    keeps that decision here, where the shapes are, rather than in each caller.
+    """
+    if not isinstance(d, dict):
+        return
+    if task.endswith("fossae_simple") or "compartments" in d:
+        if isinstance(d.get("icv_ml"), (int, float)):
+            yield ("fossae", "icv_ml"), d["icv_ml"]
+        for comp, v in (d.get("compartments") or {}).items():
+            if not isinstance(v, dict):
+                continue
+            if isinstance(v.get("ml"), (int, float)):
+                yield ("fossae", f"{comp}_ml"), v["ml"]
+            if isinstance(v.get("percent_of_icv"), (int, float)):
+                yield ("fossae", f"{comp}_pct_icv"), v["percent_of_icv"]
+        return
+    if task == "brain_icv":
+        for k in BRAIN_ICV_KEYS:
+            if isinstance(d.get(k), (int, float)):
+                yield ("brain_icv", k), d[k]
+        return
+    for structure, info in d.items():
+        if isinstance(info, dict) and "volume_mm3" in info:
+            yield (task, f"{structure}_volume"), round(info["volume_mm3"] / 1000.0, 3)
+
+
 def main():
+    # here rather than at the top: ct_gui imports read_stats to build the column
+    # picker, and the server has no use for pandas
+    import nibabel as nib
+    import pandas as pd
+
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--group", default="fossa")
@@ -48,7 +92,10 @@ def main():
 
     def wanted(task, structure=None):
         if keep is None:
-            return task != "total" or structure in (None, "brain")
+            # total is run for its brain mask alone; cases segmented before that
+            # was true carry all 117 whole-body structures, and a column filled in
+            # only for those is worse than no column. --select can still ask.
+            return task != "total" or structure in (None, "brain_volume")
         if task not in keep:
             return False
         return structure is None or not keep[task] or structure in keep[task]
@@ -73,12 +120,10 @@ def main():
                 continue
             if not isinstance(d, dict):
                 continue
-            for structure, info in d.items():
-                if (isinstance(info, dict) and "volume_mm3" in info
-                        and wanted(task, structure)):
-                    # millilitres, so this table and the brain/ICV one can be read
-                    # side by side. The unit is in the file's name.
-                    rows[case][f"{task}_{structure}_volume"] =                         round(info["volume_mm3"] / 1000.0, 3)
+            for col, val in read_stats(task, d):
+                t, name = col
+                if wanted(t, name):
+                    rows[case][f"{t}_{name}"] = val
 
     for case in cases if wanted("_scan") else []:
         # the date of the series this case was segmented from, not of whatever DICOM

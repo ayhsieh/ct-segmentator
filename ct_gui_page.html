@@ -682,18 +682,17 @@ async function project(name) {
   };
 
   const res = document.getElementById("results");
-  const kinds = [["produce_table","All structure volumes",
-                  `${name}_structure_volumes_ml.csv`],
-                 ["brain_icv","Brain and ICV","brain_icv_volumes_ml.csv"],
-                 ["fossae","Cranial fossa volumes","fossa_volumes_ml.csv"]];
-  for (const [kind, label, file] of kinds) {
+  /* One table, holding whatever you tick. Three buttons for three fixed shapes meant
+     a run of the brain/ICV one to get two columns and a separate run of the wide one
+     to get the rest, and no way at all to put them in the same row. */
+  {
+    const file = `${name}_volumes_ml.csv`;
     const c = $(`<div class="card"><div class="row">
-      <div><h3>${esc(label)}</h3><div class="meta mono">${esc(file)}</div></div>
+      <div><h3>Volumes CSV</h3><div class="meta mono">${esc(file)}</div></div>
       <span class="right"></span>
       <button class="ghost bld">Build</button>
       <button class="ghost dl">Download</button>
-      ${kind === "produce_table"
-        ? '<button class="quiet cols">choose columns</button>' : ""}
+      <button class="quiet cols">choose columns</button>
       <button class="quiet sif" title="open it in Explorer/Finder">show in folder</button>
       </div><div class="pick hide"></div><div class="out"></div></div>`);
     c.querySelector(".sif").onclick = (ev) =>
@@ -767,7 +766,7 @@ async function project(name) {
       const out = c.querySelector(".out"); out.innerHTML = "";
       try {
         const {job} = await api("/api/table",
-          Object.assign({project:name, kind}, select ? {select} : {}));
+          Object.assign({project:name}, select ? {select} : {}));
         /* The last few lines, not just a spinner: a build that is quietly segmenting a
            case says so, and one that has finished says that too. */
         const tail = [];

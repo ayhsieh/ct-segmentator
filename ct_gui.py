@@ -747,90 +747,47 @@ def job_analysis(project, kind, cases, device, license_no=""):
     return Job(kind, project, spec["label"], steps)
 
 
-def fossa_csv(project, out):
-    """The fossa table, built here rather than shelled out.
-
-    produce_table.py only picks up stats shaped {structure: {"volume_mm3": ...}}, so it
-    silently omits the fossa results, which nest under "compartments"."""
-    import csv as _csv
-    from ct_dates import study_date
-    rows = []
-    seg = seg_dir_for(project)
-    for d in sorted(p for p in seg.iterdir() if p.is_dir()):
-        hits = sorted(d.glob("*fossae_simple.stats.json"))
-        if not hits:
-            continue
-        st = json.loads(hits[0].read_text())
-        row = {"case": d.name,
-               "study_date": study_date(project, d.name,
-                                        case_dir=PROJECTS / project / d.name)[0],
-               "icv_ml": st.get("icv_ml")}
-        for comp, v in st.get("compartments", {}).items():
-            row[f"{comp}_ml"] = v["ml"]
-            row[f"{comp}_pct_icv"] = v["percent_of_icv"]
-        rows.append(row)
-    if not rows:
-        raise RuntimeError("no fossa results yet - run the cranial fossa analysis first")
-    cols = []
-    for r in rows:
-        cols += [c for c in r if c not in cols]
-    with open(out, "w", newline="") as f:
-        w = _csv.DictWriter(f, fieldnames=cols)
-        w.writeheader()
-        w.writerows(rows)
-    return len(rows)
+def job_table(project, select=None):
+    """The one table. produce_table.py reads every stats file the pipeline has written
+    and nothing else - no segmenting, whatever is missing simply has no column."""
+    out = seg_dir_for(project) / f"{project}_volumes_ml.csv"
+    argv = PY + ["produce_table.py", "--group", project, "--out", str(out)]
+    if select:
+        # via a file rather than the command line: a whole-body task alone is over a
+        # hundred structures, and that argv would not survive the trip
+        sel = seg_dir_for(project) / ".table_columns.json"
+        sel.parent.mkdir(parents=True, exist_ok=True)
+        sel.write_text(json.dumps(select, indent=2))
+        argv += ["--select", str(sel)]
+    return Job("table", project, f"CSV: {out.name}",
+               [(f"building {out.name}", argv)], queue_name="light")
 
 
-def job_table(project, kind, select=None):
-    out = seg_dir_for(project) / {
-        "produce_table": f"{project}_structure_volumes_ml.csv",
-        "brain_icv": "brain_icv_volumes_ml.csv",
-        "fossae": "fossa_volumes_ml.csv"}[kind]
-    if kind == "produce_table":
-        argv = PY + ["produce_table.py", "--group", project, "--out", str(out)]
-        if select:
-            # via a file rather than the command line: a whole-body task alone is over
-            # a hundred structures, and that argv would not survive the trip
-            sel = seg_dir_for(project) / ".table_columns.json"
-            sel.parent.mkdir(parents=True, exist_ok=True)
-            sel.write_text(json.dumps(select, indent=2))
-            argv += ["--select", str(sel)]
-        step = (f"building {out.name}", argv)
-    elif kind == "brain_icv":
-        # A table reports what has been computed. Segmenting is what Start segmenting
-        # and the analyses are for, so --no-segment is not optional here.
-        step = (f"building {out.name}",
-                PY + ["brain_icv.py", "--group", project, "--out", str(out),
-                      "--no-segment"])
-    else:
-        def build(job):
-            n = fossa_csv(project, out)
-            job.emit(f"{n} case(s) -> {out}")
-        step = (f"building {out.name}", build)
-    return Job("table", project, f"CSV: {kind}", [step], queue_name="light")
+LABELS = {"brain_icv": "brain and intracranial volume",
+          "fossae": "cranial fossae", "total": "whole body",
+          "brain_structures": "brain structures"}
 
 
 def table_columns(project):
-    """What could go in the wide table: every structure of every task, from the same
-    stats files produce_table reads, with how many cases carry each."""
+    """Every column the table could hold, with how many cases carry each.
+
+    Read through produce_table's own reader, so the list offered here and the columns
+    that come out cannot disagree about what a stats file contains."""
+    from produce_table import read_stats     # light: its pandas import is lazy
     tasks = {}
     root = seg_dir_for(project)
     cases = [d for d in root.iterdir() if d.is_dir()] if root.is_dir() else []
     for d in cases:
         for f in d.glob("*.stats.json"):
-            task = f.name[: -len(".stats.json")]
             try:
                 stats = json.loads(f.read_text())
             except Exception:
                 continue
-            if not isinstance(stats, dict):
-                continue
-            seen = tasks.setdefault(task, {})
-            for name, info in stats.items():
-                if isinstance(info, dict) and "volume_mm3" in info:
-                    seen[name] = seen.get(name, 0) + 1
-    out = [{"task": t, "structures": [{"name": n, "cases": c}
-                                      for n, c in sorted(v.items())]}
+            for (task, name), _ in read_stats(f.name[: -len(".stats.json")], stats):
+                seen = tasks.setdefault(task, {})
+                seen[name] = seen.get(name, 0) + 1
+    out = [{"task": t, "label": LABELS.get(t, t),
+            "structures": [{"name": n, "cases": c} for n, c in sorted(v.items())]}
            for t, v in sorted(tasks.items()) if v]
     out.append({"task": "_scan", "label": "scan details",
                 "structures": [{"name": "series and slice count",
@@ -2171,8 +2128,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/table":
                 name = self._project(body)
                 return self._json({"job": submit(
-                    job_table(name, body.get("kind", "produce_table"),
-                              select=body.get("select"))).id})
+                    job_table(name, select=body.get("select"))).id})
 
             if u.path == "/api/job/cancel":
                 job = JOBS.get(body.get("id", ""))
