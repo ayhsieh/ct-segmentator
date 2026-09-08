@@ -1037,14 +1037,25 @@ async function series(name, job, plan, cases) {
   const skipped = new Set();
   const blockers = new Set();
 
-  /* A card is marked as wanting an answer when it is drawn, so the filter works while
-     the scan is still going rather than only once it has finished. */
+  /* Which cases the filtered list holds: null when the filter is off, otherwise the
+     set of cases it is showing. A case joins the moment it turns out to need an answer
+     - during the scan as well as after it - and keeps its place once it is answered.
+     Cards that vanish as they are dealt with move the row under the pointer, leave
+     nothing to look back at, and take away any chance to change your mind. Switching
+     the filter off and on builds the list again from whatever is still waiting. */
   const onlywait = document.getElementById("onlywait");
+  let filtered = null;
   function applyFilter() {
-    for (const el of Object.values(slots))
-      if (el) el.hidden = onlywait.checked && el.dataset.wait !== "1";
+    for (const [cse, el] of Object.entries(slots)) {
+      if (!el) continue;
+      if (filtered && el.dataset.wait === "1") filtered.add(cse);
+      el.hidden = !!filtered && !filtered.has(cse);
+    }
   }
-  onlywait.onchange = applyFilter;
+  onlywait.onchange = () => {
+    filtered = onlywait.checked ? new Set() : null;
+    applyFilter();
+  };
 
   function retest() {
     const go = document.getElementById("go");
@@ -1213,7 +1224,7 @@ async function series(name, job, plan, cases) {
           card.querySelector(".pill").outerHTML =
             '<span class="pill on">chosen by you</span>';
           delete autoPick[cse];          /* the user's pick is already written */
-          card.dataset.wait = "";        /* answered: it leaves the filtered view */
+          card.dataset.wait = "";        /* answered - but it stays on screen */
           unresolved.delete(cse); retest();
           if (res.cleared_nifti)
             card.append($(`<div class="note amber">Removed the old converted image so
@@ -1230,9 +1241,8 @@ async function series(name, job, plan, cases) {
     return card;
   }
 
-  /* Set aside settles the case as much as choosing a series does, so it leaves the
-     filtered view too - a ticked card sitting in "only the ones that need a series"
-     reads as unfinished work. */
+  /* Set aside settles the case as much as choosing a series does: it stops counting as
+     unfinished, and like a chosen one it stays where it is until the filter is reset. */
   function wireSkip(card, cse) {
     const sk = card.querySelector(".skipck");
     if (!sk) return;
