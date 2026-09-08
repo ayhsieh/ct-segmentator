@@ -21,7 +21,7 @@ by calling segment_structures.py, so a bare folder of DICOMs is enough to start.
     python brain_icv.py --group STUDY --limit 5 --nifti
 
 Writes <case>/brain_icv.seg.nrrd and brain_icv.stats.json into the group's results
-folder, plus one brain_icv_volumes.csv for the group.
+folder, plus one brain_icv_volumes_ml.csv for the group.
 """
 import argparse
 import csv
@@ -231,7 +231,7 @@ def main():
         else:
             log(f"[{i}/{len(cases)}] {case}: SKIP - {s['status']}")
 
-    out = args.out or str(seg_dir_for(args.group) / "brain_icv_volumes.csv")
+    out = args.out or str(seg_dir_for(args.group) / "brain_icv_volumes_ml.csv")
     # The working numbers - the cut height, what was removed, the voxel size - stay in
     # each case's brain_icv.stats.json, where they are there to check a result against.
     # The table is the two volumes.

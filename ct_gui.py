@@ -783,9 +783,9 @@ def fossa_csv(project, out):
 
 def job_table(project, kind, select=None):
     out = seg_dir_for(project) / {
-        "produce_table": f"{project}_table.csv",
-        "brain_icv": "brain_icv_volumes.csv",
-        "fossae": "fossa_volumes.csv"}[kind]
+        "produce_table": f"{project}_structure_volumes_ml.csv",
+        "brain_icv": "brain_icv_volumes_ml.csv",
+        "fossae": "fossa_volumes_ml.csv"}[kind]
     if kind == "produce_table":
         argv = PY + ["produce_table.py", "--group", project, "--out", str(out)]
         if select:

@@ -659,9 +659,10 @@ async function project(name) {
   };
 
   const res = document.getElementById("results");
-  const kinds = [["produce_table","All structure volumes",`${name}_table.csv`],
-                 ["brain_icv","Brain and ICV","brain_icv_volumes.csv"],
-                 ["fossae","Cranial fossa volumes","fossa_volumes.csv"]];
+  const kinds = [["produce_table","All structure volumes",
+                  `${name}_structure_volumes_ml.csv`],
+                 ["brain_icv","Brain and ICV","brain_icv_volumes_ml.csv"],
+                 ["fossae","Cranial fossa volumes","fossa_volumes_ml.csv"]];
   for (const [kind, label, file] of kinds) {
     const c = $(`<div class="card"><div class="row">
       <div><h3>${esc(label)}</h3><div class="meta mono">${esc(file)}</div></div>

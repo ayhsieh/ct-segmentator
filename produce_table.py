@@ -8,7 +8,7 @@ slice count read from the converted NIfTI. Nothing is recomputed - this only rea
 what segment_structures.py already wrote, so it is safe to run any time.
 
     python produce_table.py --group fossa
-    python produce_table.py --group fossa --out fossa_table.csv
+    python produce_table.py --group fossa --out fossa_structure_volumes_ml.csv
 
 --select takes a JSON file naming what to keep: {"task": ["structure", ...]}, where an
 empty list means the whole task, and "_scan" covers the series and slice-count columns.
@@ -71,7 +71,9 @@ def main():
             for structure, info in d.items():
                 if (isinstance(info, dict) and "volume_mm3" in info
                         and wanted(task, structure)):
-                    rows[case][f"{task}_{structure}_volume"] = info["volume_mm3"]
+                    # millilitres, so this table and the brain/ICV one can be read
+                    # side by side. The unit is in the file's name.
+                    rows[case][f"{task}_{structure}_volume"] =                         round(info["volume_mm3"] / 1000.0, 3)
 
     for case in cases if wanted("_scan") else []:
         # the date of the series this case was segmented from, not of whatever DICOM
@@ -101,7 +103,7 @@ def main():
 
     df = pd.DataFrame.from_dict(rows, orient="index")
     df.index.name = "case"
-    out = args.out or str(total_dir / f"{args.group}_table.csv")
+    out = args.out or str(total_dir / f"{args.group}_structure_volumes_ml.csv")
     df.to_csv(out)
     print(f"{len(cases)} case(s) -> {out}")
 
