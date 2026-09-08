@@ -502,8 +502,8 @@ async function project(name) {
     <h1>${esc(name)}</h1>
     <div id="desc" style="margin:0 0 4px"></div>
     <p class="sub">${st.case_status.length} case(s) &middot;
-      ${st.mode === "move" ? "scans held here" : "linked to"}
-      <span class="mono">${esc(st.source || "")}</span></p>
+      ${st.mode === "move" ? "" : "linked to "}<span
+        class="mono">${esc(st.source || "")}</span></p>
     ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
       folder that is not there right now - is the drive connected?</div>` : ""}
     <div class="row" style="margin-bottom:10px">
