@@ -22,8 +22,10 @@ import dicom2nifti.settings as dicom2nifti_settings
 import nibabel as nib
 import numpy as np
 
-from totalsegmentator.python_api import totalsegmentator
-from totalsegmentator.nifti_ext_header import load_multilabel_nifti
+# Imported where they are used, not here. Both pull in torch, and every module that
+# reaches into this one for a path helper or a stats reader would otherwise pay for a
+# deep learning framework it never calls - two gigabytes of committed address space per
+# process, which is what runs Windows out of commit while a segmentation is running.
 
 dicom2nifti_settings.disable_validate_orthogonal()
 dicom2nifti_settings.disable_validate_slice_increment()
@@ -639,6 +641,7 @@ def process_multilabel_output(multilabel_path, nifti_path=None, task_name=None, 
         return
 
     try:
+        from totalsegmentator.nifti_ext_header import load_multilabel_nifti
         seg_img, label_map = load_multilabel_nifti(str(multilabel_path))
     except Exception as e:
         print(f"  Could not read multilabel header from {multilabel_path.name}: {e}")
@@ -940,10 +943,19 @@ def main():
                     fast=args.fast,
                     device=args.device,
                     statistics=False,    # we compute our own below
+                    # TotalSegmentator saves with six worker processes by default. On
+                    # Windows those are spawned, not forked, so each one re-imports
+                    # torch and reserves its own couple of gigabytes of commit - about
+                    # twenty gigabytes on top of the parent, which is what makes
+                    # loading a CUDA DLL fail with "the paging file is too small".
+                    # One at a time costs a little wall clock and runs anywhere.
+                    nr_thr_resamp=1,
+                    nr_thr_saving=1,
                 )
                 if args.license_number:
                     kwargs["license_number"] = args.license_number
 
+                from totalsegmentator.python_api import totalsegmentator
                 totalsegmentator(**kwargs)
 
                 # --- Compute our own per-class statistics from the multilabel file ---
