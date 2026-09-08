@@ -13,7 +13,33 @@ import json
 import os
 from pathlib import Path
 
+APP_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = Path(os.environ.get("CT_DATA_ROOT", "ct_scans"))
+
+
+def anchored(p):
+    """A path as it should be recorded: relative to this checkout when it is inside it.
+
+    Everything a project owns now lives under it, so recording absolute paths ties the
+    cache to one machine and one folder name. Written relative, the whole checkout can
+    be moved, copied to another computer or handed to someone else and every recorded
+    series choice still points at the right folder.
+    """
+    p = Path(p)
+    try:
+        return str(p.resolve().relative_to(APP_ROOT))
+    except (ValueError, OSError):
+        return str(p)
+
+
+def unanchored(p):
+    """A recorded path as a real one.
+
+    Relative means relative to this file's folder, never to the working directory. Some
+    old entries were written relative to wherever the program happened to start, which
+    resolved from the repository root and nowhere else."""
+    p = Path(p)
+    return p if p.is_absolute() else APP_ROOT / p
 
 
 def group_dir(group):
@@ -59,17 +85,26 @@ def save_cache(cache):
 
 
 def cache_keys(path):
-    """The names one case can be recorded under.
+    """The names one case can be recorded under, best first.
 
-    A project holds junctions, so a case has two honest paths - the link inside the
-    project and the folder it points at - and which one a caller is holding depends on
-    how it got there. An entry is written under both, and looked up under both.
+    Three of them. The anchored one is what gets written now. The absolute one is what
+    older entries hold, and what a case outside this checkout still needs. The literal
+    one covers a link whose target is elsewhere - a project can hold junctions, so a
+    case has two honest paths and which one a caller holds depends on how it got there.
     """
     p = Path(path)
+    out = [anchored(p)]
     try:
-        return [str(p.resolve()), str(p)]
+        out.append(str(p.resolve()))
     except OSError:
-        return [str(p)]
+        pass
+    out.append(str(p))
+    seen, keys = set(), []
+    for k in out:
+        if k not in seen:
+            seen.add(k)
+            keys.append(k)
+    return keys
 
 
 def cache_get(cache, path):
@@ -85,7 +120,7 @@ def resolve_from_cache(entry, dicom_folder):
     Returns (files, desc, snum) or (None, None, None)."""
     if not isinstance(entry, dict) or not entry.get("series_dir"):
         return None, None, None
-    series_dir = Path(entry["series_dir"])
+    series_dir = unanchored(entry["series_dir"])
     if not series_dir.is_dir():
         return None, None, None
     files = [str(f) for f in series_dir.iterdir() if f.is_file()]

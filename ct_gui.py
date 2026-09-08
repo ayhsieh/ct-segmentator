@@ -1132,16 +1132,15 @@ def job_convert(project, cases):
 def write_pick(link_path, series_dir, snum, desc):
     """Record a series choice where segment_structures will find it.
 
-    Keyed by the resolved path because Path.resolve() follows a junction, which is what
-    plan_all_folders does when it builds folder_key - so the entry must live under the
-    source path. The junction path is written too, which costs nothing and survives if
-    that behavior ever changes. series_dir is stored absolute; many existing entries
-    are relative and only resolve when the cwd happens to be the repo root.
+    Written under every name the case answers to - see ct_paths.cache_keys - because a
+    junction means one case has more than one honest path, and which one a reader holds
+    depends on how it got there. Paths inside this checkout are recorded relative to it,
+    so moving or copying the whole folder keeps every choice.
     """
-    from ct_paths import load_cache, cache_get, cache_keys, CACHE_FILE
+    from ct_paths import load_cache, cache_get, cache_keys, anchored, CACHE_FILE
     link = Path(link_path)
     entry = {"snum": str(snum), "desc": desc,
-             "series_dir": str(Path(series_dir).resolve())}
+             "series_dir": anchored(series_dir)}
     # One writer at a time, and the file replaced rather than rewritten in place. The
     # server is threaded and the page records a choice per case as the scan produces
     # it, so two of these can land together; read-modify-write without this leaves one

@@ -31,3 +31,6 @@ miniconda-installer.sh
 /samples/*.nii.gz
 .DS_Store
 .table_columns.json
+
+# the series cache and every backup of it: folder names and series descriptions
+.series_selection_cache.json*

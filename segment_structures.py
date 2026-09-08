@@ -14,6 +14,7 @@ from collections import defaultdict
 # Defined in ct_paths so that a program which only reads results - produce_table, the
 # CSV builders - can find them without importing this module and, through it, torch.
 from ct_paths import (DATA_ROOT, group_dir, nifti_dir_for, seg_dir_for,  # noqa: F401
+                      anchored, unanchored, cache_get, cache_keys,
                       CACHE_FILE, load_cache, save_cache, resolve_from_cache)
 
 import pydicom
@@ -405,7 +406,7 @@ def prompt_series_selection(dicom_folder, scored_series, folder_key, cache):
                 cache[folder_key] = {
                     "snum": meta["snum"],
                     "desc": meta["desc"],
-                    "series_dir": str(Path(files[0]).parent),
+                    "series_dir": anchored(Path(files[0]).parent),
                 }
                 save_cache(cache)
                 print(f"  Selection series {meta['snum']} '{meta['desc'] or '(no description)'}' cached.")
@@ -465,11 +466,13 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
         if not tasks_to_run:
             continue
 
-        folder_key = str(dicom_folder.resolve())
+        folder_key = anchored(dicom_folder)
 
-        # Fast path: cached entry with stored directory — zero DICOM reads
-        if folder_key in cache:
-            entry = cache[folder_key]
+        # Fast path: cached entry with stored directory - zero DICOM reads. Looked up
+        # under every name the case answers to, so a choice made through the interface
+        # and one made here are the same choice.
+        entry = cache_get(cache, dicom_folder)
+        if entry is not None:
             files, desc, snum = resolve_from_cache(entry, dicom_folder)
             if files:
                 print(f"\n[CACHE] '{dicom_folder.name}' - series {snum} '{desc or '(no description)'}'")
@@ -504,7 +507,7 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
             cache[folder_key] = {
                 "snum": snum,
                 "desc": desc,
-                "series_dir": str(Path(best_files[0]).parent),
+                "series_dir": anchored(Path(best_files[0]).parent),
             }
             print(f"\n[AUTO] '{dicom_folder.name}' - series {snum} '{desc}' "
                   f"(score={best_score}, gap={gap})")
