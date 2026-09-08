@@ -512,6 +512,9 @@ async function project(name) {
         title="open the folder holding this project's DICOMs">view files in folder</button>
       </div>
     <div id="sferr"></div>
+    <div class="row" style="margin-bottom:8px">
+      <input type="search" id="qcase" placeholder="Find a case by name…"
+             style="max-width:280px"></div>
     <div id="cases"></div>
     <div class="meta" id="cksum" style="margin-bottom:18px"></div>
     <h2>Segment</h2>
@@ -641,13 +644,31 @@ async function project(name) {
   /* The list is a scrollbox now, so how many are ticked cannot be counted by looking.
      It is said under the box, where the buttons that act on them are. */
   const sum = document.getElementById("cksum");
+  /* Filtering hides rows, it never unticks them: a case ticked and then filtered out
+     of sight is still segmented, because the run reads every ticked box and not just
+     the ones on screen. The tally says so when anything is hidden. */
+  const qc = document.getElementById("qcase");
+  const shown = () => cks.filter(c => c.closest("tr").style.display !== "none");
   function tally() {
     const n = cks.filter(x => x.checked).length;
-    ckall.checked = n === cks.length;
-    ckall.indeterminate = n > 0 && n < cks.length;
-    sum.textContent = `${n} of ${cks.length} case(s) ticked`;
+    const vis = shown();
+    const vn = vis.filter(x => x.checked).length;
+    ckall.checked = vis.length > 0 && vn === vis.length;
+    ckall.indeterminate = vn > 0 && vn < vis.length;
+    const hidden = cks.length - vis.length;
+    sum.textContent = `${n} of ${cks.length} case(s) ticked`
+      + (hidden ? ` · ${vis.length} shown, ${hidden} hidden by the search`
+                  + ` · every ticked case is run, shown or not` : "");
   }
-  ckall.onchange = () => { cks.forEach(c => { c.checked = ckall.checked; }); tally(); };
+  function filterCases() {
+    const q = qc.value.trim().toLowerCase();
+    for (const c of cks)
+      c.closest("tr").style.display =
+        !q || c.value.toLowerCase().includes(q) ? "" : "none";
+    tally();
+  }
+  qc.oninput = filterCases;
+  ckall.onchange = () => { shown().forEach(c => { c.checked = ckall.checked; }); tally(); };
   cks.forEach(c => c.addEventListener("change", tally));
   tally();
 
