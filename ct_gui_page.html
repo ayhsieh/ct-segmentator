@@ -83,6 +83,14 @@ tr.sel td{background:var(--accentdim)}
 .bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
 .tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px;
   background:var(--surface)}
+
+/* The case list scrolls inside itself. Otherwise a project of any size puts what to
+   segment, and the button that starts it, a page-length below the fold - and at a
+   thousand cases they would be unreachable without a long scroll every time. */
+#cases{max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);margin-bottom:6px}
+#cases td{padding-left:12px}
+#cases th{position:sticky;top:0;z-index:1;background:var(--panel);padding-left:12px}
 .tasklist label{display:flex;gap:11px;padding:10px 14px;border-bottom:1px solid #ece6da;
   cursor:pointer;align-items:flex-start}
 .tasklist label:hover{background:var(--panel)}
@@ -473,6 +481,7 @@ async function project(name) {
     <div class="row" style="margin-bottom:10px">
       <button class="ghost" id="addcases">Add cases</button></div>
     <div id="cases"></div>
+    <div class="meta" id="cksum" style="margin-bottom:18px"></div>
     <h2>Segment</h2>
     <div class="row" style="margin-bottom:10px">
       <input type="search" id="q" placeholder="Search 40 structures…" style="max-width:320px">
@@ -589,12 +598,18 @@ async function project(name) {
      leave the header showing "some", not a lie in either direction. */
   const ckall = document.getElementById("ckall");
   const cks = [...tbl.querySelectorAll(".ck")];
-  ckall.onchange = () => cks.forEach(c => { c.checked = ckall.checked; });
-  cks.forEach(c => c.addEventListener("change", () => {
+  /* The list is a scrollbox now, so how many are ticked cannot be counted by looking.
+     It is said under the box, where the buttons that act on them are. */
+  const sum = document.getElementById("cksum");
+  function tally() {
     const n = cks.filter(x => x.checked).length;
     ckall.checked = n === cks.length;
     ckall.indeterminate = n > 0 && n < cks.length;
-  }));
+    sum.textContent = `${n} of ${cks.length} case(s) ticked`;
+  }
+  ckall.onchange = () => { cks.forEach(c => { c.checked = ckall.checked; }); tally(); };
+  cks.forEach(c => c.addEventListener("change", tally));
+  tally();
 
   const tl = document.getElementById("tl");
   const draw = (filter) => {
