@@ -149,6 +149,20 @@ body.wide main{max-width:1180px}
 .vcap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:340px;
   text-align:center;color:#e8e2d6;font-family:var(--sans);font-size:13px;line-height:1.5}
 .stack>*+*{margin-top:9px}
+
+/* Shown on every screen while anything is running, so leaving the job screen never
+   means losing the run: it is the way back to it, and the way to stop it. */
+#live{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;
+  background:var(--surface);border-top:1px solid var(--edge);
+  box-shadow:0 -2px 14px rgba(33,31,27,.08)}
+#live.on{display:block}
+#live .in{max-width:840px;margin:0 auto;padding:10px 22px;display:flex;
+  align-items:center;gap:12px;font-family:var(--sans);font-size:14px}
+#live .what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#live .what b{font-weight:600}
+#live .n{color:var(--faint)}
+body{padding-bottom:0}
+body.livebar{padding-bottom:64px}
 </style>
 </head>
 <body>
@@ -160,6 +174,12 @@ body.wide main{max-width:1180px}
 <main>
   <div id="view"></div>
 </main>
+<div id="live"><div class="in">
+  <span class="spin dark"></span>
+  <span class="what" id="liveWhat"></span>
+  <button class="quiet" id="liveView">View</button>
+  <button class="ghost" id="liveStop">Stop</button>
+</div></div>
 
 <script>
 const TOKEN = "__TOKEN__";
@@ -170,6 +190,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
 const view = document.getElementById("view");
 const crumb = document.getElementById("crumb");
 let POLL = null;
+let CLOCK = null;
 
 async function api(path, body) {
   const opt = body
@@ -228,6 +249,8 @@ function route() {
   /* The viewer needs a wider column than anything else. Toggled here rather than in
      the page function, so no other page has to remember to put it back. */
   document.body.classList.toggle("wide", v === "viewseg");
+  /* leaving the job screen, so the running bar becomes the way back to it */
+  LIVE_ON = false;
   (ROUTES[v] || ROUTES.home)(parts);
 }
 window.addEventListener("hashchange", route);
@@ -782,6 +805,44 @@ async function reveal(project, cse, file, out, btn) {
   finally { undo(); }
 }
 
+/* ------------------------------------------------------- the running bar */
+/* A job outlives the screen that started it, so every screen carries a bar naming what
+   is running, with the way back to it and the way to stop it. Polled on its own timer,
+   not the screen's, because stopPoll() belongs to whatever screen is drawn. */
+let LIVE = [];                 /* ids of what is running, in the order they run */
+let LIVE_ON = false;           /* is the job screen already showing them */
+
+function liveBar() {
+  const bar = document.getElementById("live");
+  const on = LIVE.length > 0 && !LIVE_ON;
+  bar.classList.toggle("on", on);
+  document.body.classList.toggle("livebar", on);
+}
+
+async function watchLive() {
+  let j;
+  try { j = await api("/api/jobs"); } catch { return; }
+  LIVE = j.jobs.map(x => x.id);
+  const first = j.jobs[0];
+  if (first) {
+    const n = j.jobs.length > 1 ? ` <span class="n">(+${j.jobs.length - 1} waiting)</span>` : "";
+    document.getElementById("liveWhat").innerHTML =
+      (first.state === "queued"
+        ? `${esc(first.project)} &mdash; queued`
+        : `${esc(first.project)} &mdash; ${esc(first.label)} &middot; step ${first.step} of ${first.steps}`
+          + (first.step_label ? ` &middot; <b>${esc(first.step_label)}</b>` : "")) + n;
+    document.getElementById("liveView").onclick = () => running(first.project, LIVE.slice());
+    document.getElementById("liveStop").onclick = async (ev) => {
+      const undo = pending(ev.currentTarget, "Stopping…");
+      for (const id of LIVE.slice()) { try { await api("/api/job/cancel", {id}); } catch {} }
+      undo();
+    };
+  }
+  liveBar();
+}
+setInterval(watchLive, 2000);
+watchLive();
+
 /* ------------------------------------------------------- job following */
 async function follow(id, onTick) {
   let since = 0;
@@ -802,6 +863,7 @@ async function follow(id, onTick) {
 
 function running(name, jobs) {
   stopPoll(); crumb.textContent = name + " · running";
+  LIVE_ON = true; liveBar();   /* this screen is the bar, so the bar stands down */
   view.innerHTML = "";
   view.append($(`<div>
     <h1>Working</h1>
@@ -823,7 +885,8 @@ function running(name, jobs) {
   /* a ticking clock is what separates "working" from "frozen" when TotalSegmentator
      goes quiet for minutes at a time */
   let t0 = Date.now();
-  setInterval(() => {
+  if (CLOCK) clearInterval(CLOCK);   /* one ticker, however many times this is opened */
+  CLOCK = setInterval(() => {
     const el = document.getElementById("clock");
     if (el && el.dataset.live === "1")
       el.textContent = fmtTime((Date.now() - t0) / 1000);

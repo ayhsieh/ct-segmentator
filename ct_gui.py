@@ -1945,11 +1945,16 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/columns":
                 return self._json(table_columns(self._project(q)))
             if u.path == "/api/jobs":
+                # Only what is still going, oldest first, and without the log - this is
+                # polled from every screen so that a run can be watched or stopped from
+                # anywhere, and the order is the order the screen has to follow them in.
                 with LOCK:
-                    ids = list(JOB_ORDER)[-40:]
-                    js = [JOBS[i].snapshot(since=10 ** 9) for i in ids if i in JOBS]
-                return self._json({"jobs": list(reversed(js)),
-                                   "busy": queue_depth("gpu")})
+                    live = [JOBS[i] for i in JOB_ORDER
+                            if i in JOBS and JOBS[i].state in ("queued", "running")]
+                return self._json({"jobs": [
+                    {"id": j.id, "project": j.project, "label": j.label,
+                     "state": j.state, "step": j.step_i, "steps": j.step_n,
+                     "step_label": j.step_label} for j in live]})
             if u.path == "/api/job":
                 jid = q.get("id", "")
                 job = JOBS.get(jid)
