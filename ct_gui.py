@@ -40,6 +40,10 @@ from urllib.parse import urlparse, parse_qs, quote
 
 APP = Path(__file__).resolve().parent
 PROJECTS = APP / "projects"
+# Where the pipeline reads and writes, for this process and every child it starts.
+# Set before ct_paths is imported, because that is when it is read.
+os.environ["CT_DATA_ROOT"] = str(PROJECTS)
+from ct_paths import nifti_dir_for, seg_dir_for  # noqa: E402
 PAGE_FILE = APP / "ct_gui_page.html"
 TOKEN = secrets.token_urlsafe(18)
 WIN = sys.platform == "win32"
@@ -51,9 +55,9 @@ MAX_LOG_LINES = 4000
 
 # ------------------------------------------------------------------ the pipeline
 # Read from the pipeline source rather than hardcoded, so the two cannot drift, and
-# by parsing rather than importing, because importing segment_structures pulls in
-# torch (~2s and a lot of memory) and we want the server to start instantly and to
-# never hold a CUDA context - every real job runs in its own subprocess.
+# by parsing rather than importing, because those modules load pydicom, nibabel and
+# TotalSegmentator's label maps, and the server should start instantly and hold no
+# state of its own - every real job runs in its own subprocess.
 def _literal(path, *names):
     out = {}
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -239,15 +243,6 @@ ANALYSES = {
         "needs": ["brain_structures"],
     },
 }
-
-
-def seg_dir_for(group):
-    """Mirrors segment_structures.seg_dir_for; duplicated to avoid importing torch."""
-    return PROJECTS / group / f"total_segmentor_results_{group}"
-
-
-def nifti_dir_for(group):
-    return PROJECTS / group / f"converted_nifti_{group}"
 
 
 # ------------------------------------------------------------------- dicom probing
@@ -599,8 +594,7 @@ def tree_kill(proc):
 
 
 def child_env(group=None):
-    env = dict(os.environ)
-    env["CT_DATA_ROOT"] = str(PROJECTS)
+    env = dict(os.environ)   # CT_DATA_ROOT is already in it, set at import
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
@@ -987,7 +981,12 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
 
 
 # --------------------------------------------------------------- series selection
-AUTO_MIN_SCORE, AUTO_MIN_GAP = 20, 15       # segment_structures.py:467-468
+# Read from the pipeline rather than restated here, so the interface can never
+# auto-select on a threshold the command line has since moved.
+_A = _literal(APP / "segment_structures.py",
+              "AUTO_SELECT_MIN_SCORE", "AUTO_SELECT_MIN_GAP")
+AUTO_MIN_SCORE = _A.get("AUTO_SELECT_MIN_SCORE", 20)
+AUTO_MIN_GAP = _A.get("AUTO_SELECT_MIN_GAP", 15)
 
 
 def scan_folder(path, quick=False):
@@ -996,18 +995,16 @@ def scan_folder(path, quick=False):
     # ct_paths, not segment_structures: answering from a recorded choice needs no
     # scoring, and importing the pipeline would load torch - seconds, and a few hundred
     # megabytes of CUDA DLLs that Windows can refuse outright when commit is short.
-    from ct_paths import load_cache, resolve_from_cache
+    from ct_paths import load_cache, cache_get, resolve_from_cache
     path = Path(path)
     key = str(path.resolve())
-    cache = load_cache()
+    entry = cache_get(load_cache(), path)
     cached = None
-    for k in (key, str(path)):
-        if k in cache:
-            files, desc, snum = resolve_from_cache(cache[k], path)
-            if files:
-                cached = {"snum": snum, "desc": desc,
-                          "series_dir": cache[k].get("series_dir", "")}
-            break
+    if entry:
+        files, desc, snum = resolve_from_cache(entry, path)
+        if files:
+            cached = {"snum": snum, "desc": desc,
+                      "series_dir": entry.get("series_dir", "")}
 
     if cached and quick:
         # This is the whole reason the command line starts instantly on a study it has
@@ -1052,8 +1049,9 @@ def convert_case(group, case):
     finds this file and reuses it rather than converting a second, differently named
     copy.
     """
+    from ct_paths import load_cache, cache_get, resolve_from_cache
     from segment_structures import (get_series, get_series_metadata, score_series,
-                                    load_cache, resolve_from_cache, sanitize_filename)
+                                    sanitize_filename)
     import dicom2nifti
     link = PROJECTS / group / case
     if not link.exists():
@@ -1061,12 +1059,9 @@ def convert_case(group, case):
 
     files = desc = None
     snum = ""
-    cache = load_cache()
-    for k in (str(link.resolve()), str(link)):
-        if k in cache:
-            files, desc, snum = resolve_from_cache(cache[k], link)
-            if files:
-                break
+    entry = cache_get(load_cache(), link)
+    if entry:
+        files, desc, snum = resolve_from_cache(entry, link)
     if not files:
         # No recorded pick, so score them the way the pipeline would and take the
         # winner only if it wins clearly. Anything closer than that is a choice for a
@@ -1124,7 +1119,7 @@ def write_pick(link_path, series_dir, snum, desc):
     that behavior ever changes. series_dir is stored absolute; many existing entries
     are relative and only resolve when the cwd happens to be the repo root.
     """
-    from segment_structures import load_cache, CACHE_FILE
+    from ct_paths import load_cache, cache_get, cache_keys, CACHE_FILE
     link = Path(link_path)
     entry = {"snum": str(snum), "desc": desc,
              "series_dir": str(Path(series_dir).resolve())}
@@ -1134,9 +1129,9 @@ def write_pick(link_path, series_dir, snum, desc):
     # document written over the middle of another, and the cache will not parse.
     with _CACHE_LOCK:
         cache = load_cache()
-        before = cache.get(str(link.resolve())) or cache.get(str(link))
-        cache[str(link.resolve())] = entry
-        cache[str(link)] = entry
+        before = cache_get(cache, link)
+        for k in cache_keys(link):
+            cache[k] = entry
         tmp = CACHE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(cache, indent=2), encoding="utf-8")
         os.replace(tmp, CACHE_FILE)
@@ -1149,7 +1144,7 @@ def write_pick(link_path, series_dir, snum, desc):
 
 def clear_converted(group, case):
     """A new series pick is silently ignored unless the old NIfTI goes: the converter
-    reuses any existing file with the same name (segment_structures.py:954)."""
+    reuses any existing file of the same name rather than writing it again."""
     d = nifti_dir_for(group) / case
     n = 0
     if d.is_dir():

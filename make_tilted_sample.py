@@ -22,7 +22,8 @@ from pathlib import Path
 import numpy as np
 import nibabel as nib
 
-from segment_structures import seg_dir_for, find_source_nifti, nifti_dir_for
+from ct_paths import seg_dir_for, nifti_dir_for
+from segment_structures import find_source_nifti
 
 
 def rotation(pitch_deg, roll_deg, yaw_deg=0.0):

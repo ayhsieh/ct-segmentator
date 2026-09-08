@@ -36,7 +36,7 @@ import nrrd
 from segment_fossae import (log, load_bool, world_z, run_task_for_case,
                             discover_cases, BRAIN_TASK)
 from ct_dates import study_date
-from segment_structures import seg_dir_for
+from ct_paths import seg_dir_for
 
 COLORS = {"intracranial_volume": "0.400 0.750 1.000", "brain": "1.000 0.450 0.450"}
 # taken out of the brain mask to leave parenchyma: CSF spaces and the dural folds

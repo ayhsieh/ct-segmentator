@@ -48,7 +48,8 @@ import torch
 from scipy.spatial import ConvexHull, Delaunay
 from skimage import measure
 
-from segment_structures import seg_dir_for, find_source_nifti, multilabel_to_segnrrd
+from ct_paths import seg_dir_for
+from segment_structures import find_source_nifti, multilabel_to_segnrrd
 
 MODEL_PATH = Path(__file__).parent / "cranial_ct_processing" / "Model.dat"
 

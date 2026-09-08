@@ -58,6 +58,28 @@ def save_cache(cache):
         json.dump(cache, f, indent=2)
 
 
+def cache_keys(path):
+    """The names one case can be recorded under.
+
+    A project holds junctions, so a case has two honest paths - the link inside the
+    project and the folder it points at - and which one a caller is holding depends on
+    how it got there. An entry is written under both, and looked up under both.
+    """
+    p = Path(path)
+    try:
+        return [str(p.resolve()), str(p)]
+    except OSError:
+        return [str(p)]
+
+
+def cache_get(cache, path):
+    """The recorded choice for a case, under either of its names, or None."""
+    for k in cache_keys(path):
+        if k in cache:
+            return cache[k]
+    return None
+
+
 def resolve_from_cache(entry, dicom_folder):
     """Try to resolve a work item from a cache entry (new dict format).
     Returns (files, desc, snum) or (None, None, None)."""

@@ -37,6 +37,7 @@ Writes <case>/fossae_simple.nii.gz / .seg.nrrd / .stats.json / _curves.npz
 and the floor-map picture _map.png (--no-map to skip).
 """
 
+import argparse
 import os
 import sys
 import json
@@ -46,8 +47,9 @@ from pathlib import Path
 import numpy as np
 import nibabel as nib
 from scipy import ndimage
-from segment_structures import (seg_dir_for, find_source_nifti,
-                                multilabel_to_segnrrd, group_dir)
+from scipy.interpolate import PchipInterpolator
+from ct_paths import seg_dir_for, group_dir
+from segment_structures import find_source_nifti, multilabel_to_segnrrd
 from totalsegmentator.map_to_binary import class_map
 
 # ---- from the plane-based pipeline this file replaces ------------------------
@@ -478,21 +480,7 @@ def _validate():
 
 _validate()
 
-# --------------------------------------------------------------------------
-
-import argparse
-import json
-import os
-import sys
-from pathlib import Path
-
-import numpy as np
-import nibabel as nib
-from scipy import ndimage
-from scipy.interpolate import PchipInterpolator
-
-from segment_structures import (seg_dir_for, find_source_nifti,
-                                multilabel_to_segnrrd, group_dir)
+# ------------------------------------------------ finding the floor of each fossa
 
 LANE_MM = 4.0        # lane width across the head
 FBIN_MM = 1.5        # bin size front-to-back
