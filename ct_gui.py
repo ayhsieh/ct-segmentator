@@ -713,12 +713,42 @@ def job_segment(project, cases, tasks, device, license_no, force):
     return Job("segment", project, f"{len(tasks)} task(s) x {len(cases)} case(s)", steps)
 
 
-def job_analysis(project, kind, cases, device):
+# What an analysis reads before it computes anything: the brain structure maps, and the
+# brain ROI from total, which gives the foramen magnum floor. Each entry is the task to
+# run, the extra arguments it needs, and the file that proves it has already been run.
+PREREQS = [("brain_structures", [], "brain_structures/*.nii.gz"),
+           ("total", ["--roi-subset", "brain"], "total/brain.nii.gz")]
+
+
+def job_analysis(project, kind, cases, device, license_no=""):
+    """Segment everything the analysis will need, then analyse.
+
+    The analysis scripts can segment what they find missing themselves, and that is
+    right for the command line, where nothing else is running. Here it means a process
+    holding torch shells out to a second process holding torch, which spawns
+    TotalSegmentator's own workers - each of those a fresh interpreter that imports
+    torch again, because Windows spawns where Linux forks. Making the segmentation its
+    own step keeps it to one at a time, and the steps are separately named, cancellable
+    and attributable besides.
+    """
     spec = ANALYSES[kind]
+    seg = seg_dir_for(project)
     steps = []
+    for case in cases:
+        for task, extra, proof in PREREQS:
+            if list((seg / case).glob(proof)):
+                continue
+            argv = PY + ["segment_structures.py", str(PROJECTS / project / case),
+                         "--group-name", project, "--task", task,
+                         "--skip-planning", "--device", device] + extra
+            if license_no and task in LICENSED_TASKS:
+                argv += ["--license-number", license_no]
+            steps.append((f"{case} - {task}", argv))
     for case in cases:
         argv = PY + [spec["script"], "--group", project, "--case", case,
                      "--device", device]
+        if kind == "brain_icv":
+            argv.append("--no-segment")
         steps.append((f"{case} - {spec['label']}", argv))
     return Job(kind, project, spec["label"], steps)
 
@@ -2118,7 +2148,11 @@ class Handler(BaseHTTPRequestHandler):
                 analyses = body.get("analyses") or []
                 device = body.get("device", "gpu")
                 lic = (body.get("license") or "").strip()
-                need_lic = [t for t in tasks if t in LICENSED_TASKS]
+                # an analysis segments its own prerequisites, and one of those
+                # is licensed, so asking for it is asking for that too
+                wanted = set(tasks) | ({t for t, _, _ in PREREQS} if analyses
+                                       else set())
+                need_lic = [t for t in sorted(wanted) if t in LICENSED_TASKS]
                 if need_lic and not lic and not license_stored():
                     return self._json({"error": "these need a license number: "
                                        + ", ".join(need_lic)}, 400)
@@ -2128,7 +2162,8 @@ class Handler(BaseHTTPRequestHandler):
                                                   bool(body.get("force")))).id)
                 for a in analyses:
                     if a in ANALYSES:
-                        ids.append(submit(job_analysis(name, a, cases, device)).id)
+                        ids.append(submit(
+                            job_analysis(name, a, cases, device, lic)).id)
                 if not ids:
                     return self._json({"error": "nothing selected"}, 400)
                 return self._json({"jobs": ids})
