@@ -943,14 +943,6 @@ def main():
                     fast=args.fast,
                     device=args.device,
                     statistics=False,    # we compute our own below
-                    # TotalSegmentator saves with six worker processes by default. On
-                    # Windows those are spawned, not forked, so each one re-imports
-                    # torch and reserves its own couple of gigabytes of commit - about
-                    # twenty gigabytes on top of the parent, which is what makes
-                    # loading a CUDA DLL fail with "the paging file is too small".
-                    # One at a time costs a little wall clock and runs anywhere.
-                    nr_thr_resamp=1,
-                    nr_thr_saving=1,
                 )
                 if args.license_number:
                     kwargs["license_number"] = args.license_number
