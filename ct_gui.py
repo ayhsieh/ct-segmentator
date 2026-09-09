@@ -479,7 +479,10 @@ def drop_link(link):
     try:
         if link.is_symlink():
             link.unlink()
-        elif link.is_dir():
+        else:
+            # rmdir whether or not the target is still there: a junction whose target
+            # has moved answers False to is_dir(), so asking first left it behind, and
+            # rmdir on a real folder with anything in it refuses anyway.
             os.rmdir(link)              # a junction is an empty-looking dir to rmdir
     except OSError:
         pass
