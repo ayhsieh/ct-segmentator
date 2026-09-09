@@ -1454,13 +1454,36 @@ async function fossa(name, cse) {
 
   function vols() {
     const c = (ST.stats || {}).compartments || {};
+    const o = (ST.stats || {}).outer_mm || {};
     const box = document.getElementById("vols"); box.innerHTML = "";
-    if (!Object.keys(c).length) return;
-    box.append($(`<div class="card"><div class="row">` +
-      Object.entries(c).map(([k,v]) =>
-        `<div style="margin-right:26px"><h3>${esc(k.replace("_"," "))}</h3>
-         <div class="meta">${v.ml} mL &middot; ${v.percent_of_icv}% of ICV</div></div>`
-      ).join("") + `</div></div>`));
+    if (!Object.keys(c).length && !Object.keys(o).length) return;
+    const cell = (h, sub) =>
+      `<div style="margin-right:26px"><h3>${esc(h)}</h3>
+       <div class="meta">${esc(sub)}</div></div>`;
+    let html = "";
+    if (Object.keys(c).length)
+      html += `<div class="row">` + Object.entries(c).map(([k, v]) =>
+        cell(k.replace("_", " "), `${v.ml} mL · ${v.percent_of_icv}% of ICV`)
+      ).join("") + `</div>`;
+    /* the outside of the same head, next to the volumes of its inside - the pair is
+       the point, and a surgeon reads the millimetres more often than the millilitres */
+    if (Object.keys(o).length) {
+      const mm = (k) => o[k] == null ? "—" : o[k] + " mm";
+      html += `<div class="row" style="margin-top:12px;border-top:1px solid var(--line);
+        padding-top:12px">`
+        + cell("length", mm("length_ofd"))
+        + cell("width", mm("width_bpd"))
+        + cell("height", mm("height"))
+        + cell("circumference", mm("circumference_ofc"))
+        + cell("cephalic index", o.cephalic_index == null ? "—"
+                                 : String(o.cephalic_index))
+        + `</div><div class="row" style="margin-top:6px">`
+        + ["anterior", "middle", "posterior"].map(z =>
+            cell(z, `${mm(z + "_width")} wide · ${mm(z + "_height")} tall`)
+          ).join("")
+        + `<span class="right meta">outer surface of the skull</span></div>`;
+    }
+    box.append($(`<div class="card">${html}</div>`));
   }
 
   async function send(edits, btn, label) {
