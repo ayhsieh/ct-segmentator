@@ -146,6 +146,16 @@ body.wide main{max-width:1180px}
   overflow:hidden;cursor:crosshair;user-select:none;touch-action:none}
 .vstage:focus{outline:2px solid var(--accent);outline-offset:2px}
 .vstage img{display:block;pointer-events:none}
+/* The measurement lines sit exactly over the image, in the image's own pixels, so they
+   stay put however the picture is scaled to the window. */
+.vstage svg.vmeas{position:absolute;pointer-events:none}
+.vstage svg.vmeas line{stroke-linecap:round}
+.vstage svg.vmeas circle{r:2.2}
+/* the viewBox is millimetres, so strokes and type are given in millimetres too and
+   keep their size against the head however the picture is scaled */
+.vstage svg.vmeas line{stroke-width:1.3}
+.vstage svg.vmeas text{font:600 6px var(--sans);paint-order:stroke;
+  stroke:rgba(0,0,0,.65);stroke-width:1.6px}
 /* .hide is a single class and loses to the rules above on specificity */
 .vstage img.hide,.vstage canvas.hide{display:none}
 .vbusy{position:absolute;top:9px;right:12px;color:#fff;opacity:.7;font-size:12px;
@@ -1880,6 +1890,7 @@ async function viewseg(name, cse, focus) {
           <button class="quiet" id="vnone">hide all</button>
         </div>
         <div class="vtree" id="vtree"></div>
+        <div id="vmlist"></div>
       </aside>
       <section>
         <div class="row" style="margin:0 0 10px">
@@ -1888,6 +1899,7 @@ async function viewseg(name, cse, focus) {
         </div>
         <div class="vstage" id="vstage" tabindex="0">
           <img id="vimg" alt="">
+          <svg class="vmeas" id="vmeas"></svg>
           <div class="vbusy hide" id="vbusy">loading…</div>
         </div>
         <input type="range" id="vsl" style="width:100%;margin:12px 0 2px"
@@ -2087,6 +2099,81 @@ async function viewseg(name, cse, focus) {
      A timer debounce would either lag behind a fast drag or flood a slow one; this
      self-paces to whatever the server is actually managing. */
   const stage = g("vstage"), img = g("vimg"), busy = g("vbusy");
+
+  /* ---- cranial measurements, drawn over the image.
+     The server hands each one two points already in the image's own pixels, with the
+     slice each point sits on, so this only has to decide whether the slice in view is
+     near enough and draw a line. The SVG is sized and placed to match the <img>, and
+     its viewBox is the image's pixel grid, so a line drawn at pixel 404 stays on the
+     bone at pixel 404 however the picture is scaled. */
+  const svg = g("vmeas");
+  const MEAS = st.measures || [];
+  /* The three that describe the whole head are on; the regional ones are there to be
+     asked for. Six lines at once is a thicket, and two of them coincide - the middle
+     region's width is usually the maximum breadth itself. */
+  const mOn = new Set(["width_bpd", "length_ofd", "height"]);
+  /* How far off the slice a point can be and still be drawn - in millimetres, not in
+     slices. Slices are 2.5 mm apart one way here and 0.49 mm the other, so a count of
+     slices means eight millimetres on one view and one and a half on another, and the
+     lines vanish on whichever plane happens to be finely sampled. */
+  const NEAR_MM = 9;
+  const sliceMM = () => ({axial: st.zooms[2], coronal: st.zooms[1],
+                          sagittal: st.zooms[0]}[S.plane] || 1);
+
+  function drawMeasures() {
+    const P = st.planes[S.plane], at = S.idx[S.plane];
+    const r = img.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    /* the picture's own millimetres, which is how the server sends the points and how
+       the slice is drawn - not one unit per voxel */
+    svg.setAttribute("viewBox", `0 0 ${P.mm_w} ${P.mm_h}`);
+    svg.setAttribute("width", r.width);
+    svg.setAttribute("height", r.height);
+    svg.style.left = (r.left - sr.left) + "px";
+    svg.style.top = (r.top - sr.top) + "px";
+    let out = "";
+    for (const m of MEAS) {
+      if (!mOn.has(m.key)) continue;
+      const a = m.a[S.plane], b = m.b[S.plane];
+      /* both ends near, not either: a measurement whose far end is slices away is
+         being seen end-on, and its line across this picture means nothing. This is
+         what keeps the length off the axial views and on the sagittal ones. */
+      const d = Math.max(Math.abs(a.i - at), Math.abs(b.i - at)) * sliceMM();
+      if (d > NEAR_MM) continue;
+      /* fainter the further the slice is from the one the point sits on, so it is
+         obvious when you are looking at the place it was actually measured */
+      const op = 1 - 0.7 * (d / NEAR_MM);
+      out += `<g opacity="${op.toFixed(2)}" stroke="${m.colour}" fill="${m.colour}">`
+        + `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"></line>`
+        + `<circle cx="${a.x}" cy="${a.y}"></circle>`
+        + `<circle cx="${b.x}" cy="${b.y}"></circle>`
+        + `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}"`
+        + ` text-anchor="middle" stroke-width="1.6">${esc(m.label)} ${m.mm} mm</text></g>`;
+    }
+    svg.innerHTML = out;
+  }
+
+  function measureList() {
+    const box = g("vmlist");
+    if (!MEAS.length) { box.innerHTML = ""; return; }
+    box.innerHTML = "";
+    box.append($(`<div class="meta" style="margin:14px 0 4px">Measurements</div>`));
+    for (const m of MEAS) {
+      const row = $(`<div class="vrow${mOn.has(m.key) ? " on" : ""}">
+        <span class="veye">&#9679;</span>
+        <span class="vsw" style="background:${m.colour}"></span>
+        <span class="vname">${esc(m.label)}</span>
+        <span class="right meta">${m.mm} mm</span></div>`);
+      row.onclick = () => {
+        mOn.has(m.key) ? mOn.delete(m.key) : mOn.add(m.key);
+        row.classList.toggle("on", mOn.has(m.key));
+        drawMeasures();
+      };
+      box.append(row);
+    }
+  }
+  measureList();
+  img.addEventListener("load", drawMeasures);
+  window.addEventListener("resize", drawMeasures);
   let inflight = null, want = null, shown = "", busyT = null, dead = false;
 
   const sliceURL = (i) =>

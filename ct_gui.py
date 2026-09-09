@@ -1533,6 +1533,76 @@ def _resample_labels(lab, laff, ct):
                                     prefilter=False).astype(lab.dtype)
 
 
+# The pairs of recorded points that make a measurement, and what to call each one.
+# Named here rather than in the page so the two cannot disagree about which point goes
+# with which; segment_fossae writes the points, this says what they mean together.
+MEASURES = [
+    ("width_bpd", "euryon_a", "euryon_b", "width", "#ff4d3d"),
+    ("length_ofd", "glabella", "opisthocranion", "length", "#2bb3ff"),
+    ("height", "height_foot", "vertex", "height", "#3ddc84"),
+    ("anterior_width", "anterior_width_a", "anterior_width_b", "anterior width",
+     "#c88bff"),
+    ("middle_width", "middle_width_a", "middle_width_b", "middle width", "#ffb648"),
+    ("posterior_width", "posterior_width_a", "posterior_width_b", "posterior width",
+     "#7de0d0"),
+]
+
+
+def measurement_lines(group, case, shape, zooms, aff):
+    """Each cranial measurement as two points in the viewer's own pixel coordinates.
+
+    Turned here rather than in the page because the flips that orient a slice for
+    display live here, in slice2d, and a second copy of them in JavaScript would be one
+    more thing to keep in step. The page is handed pixels and a slice number and has
+    only to draw a line.
+    """
+    import numpy as np
+    d = seg_dir_for(group) / case
+    stats = None
+    for f in sorted(d.glob("*fossae_simple.stats.json")):
+        try:
+            stats = json.loads(f.read_text())
+        except Exception:
+            continue
+        break
+    pts = ((stats or {}).get("outer_mm") or {}).get("points") or {}
+    if not pts:
+        return []
+    inv = np.linalg.inv(aff)
+    nx, ny, nz = shape
+    zx, zy, zz = zooms
+
+    def at(name):
+        """Where the point is drawn, in millimetres across the picture.
+
+        Millimetres and not voxels: a slice is served at the size it is in the patient,
+        not one pixel per voxel, because 0.49 mm across and 2.5 mm through would make a
+        head look like a letterbox. Distances along the through-plane axis stay in
+        slices, which is what the viewer counts in.
+        """
+        w = pts.get(name)
+        if not w:
+            return None
+        x, y, z = (inv[:3, :3] @ np.asarray(w, float) + inv[:3, 3])
+        # the same flips slice2d applies, so a point lands where its voxel is drawn
+        return {"axial": {"x": (nx - 1 - x) * zx, "y": (ny - 1 - y) * zy,
+                          "i": int(round(z))},
+                "coronal": {"x": (nx - 1 - x) * zx, "y": (nz - 1 - z) * zz,
+                            "i": int(round(y))},
+                "sagittal": {"x": (ny - 1 - y) * zy, "y": (nz - 1 - z) * zz,
+                             "i": int(round(x))}}
+
+    out = []
+    mm = (stats or {}).get("outer_mm") or {}
+    for key, a, b, label, colour in MEASURES:
+        pa, pb = at(a), at(b)
+        if not pa or not pb or mm.get(key) is None:
+            continue
+        out.append({"key": key, "label": label, "colour": colour,
+                    "mm": mm[key], "a": pa, "b": pb})
+    return out
+
+
 def view_case(group, case):
     """Everything the viewer needs to draw its chrome, without reading a voxel.
 
@@ -1574,9 +1644,14 @@ def view_case(group, case):
         layers.append({"task": label, "status": status,
                        "segments": [{"i": s["i"], "name": s["name"],
                                      "color": s["color"]} for s in segs]})
+    try:
+        measures = measurement_lines(group, case, shape, zooms, aff)
+    except Exception as e:                      # a measurement must not cost the viewer
+        measures, _ = [], warnings.append(f"measurements unavailable: {e}")
     return {"project": group, "case": case, "shape": shape, "zooms": zooms,
             "planes": planes, "presets": WINDOW_PRESETS, "default": "bone",
-            "stamp": max(stamps), "layers": layers, "warnings": warnings}
+            "stamp": max(stamps), "layers": layers, "warnings": warnings,
+            "measures": measures}
 
 
 def _qint(q, key, default):
