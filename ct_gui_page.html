@@ -158,6 +158,20 @@ tr.sel td{background:var(--accentdim)}
 .step.fail .dot{background:var(--warn)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .termtoggle{display:block;margin:14px 0 8px;cursor:pointer}
+
+/* Project cards. A grid because the sidebar does the navigating now and this screen can
+   use the width; the case count is the thing you look for, so it is the big number. */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+/* The floor map and the numbers it produced, side by side: you trace a boundary and
+   watch what it does, instead of scrolling between the two. */
+.fcols{display:grid;grid-template-columns:580px 1fr;gap:24px;align-items:start}
+@media (max-width:1100px){.fcols{grid-template-columns:1fr}}
+.pcard{margin:0;display:flex;flex-direction:column;gap:3px}
+.pcard h3{font-size:17px}
+.pcard .n{font-family:var(--sans);font-size:13px;color:var(--accent);font-weight:600}
+.pcard .d{font-size:15px;color:var(--mid);margin:4px 0 2px}
+.pcard .src{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:auto;
+  padding-top:8px}
 #log.hide{display:none}
 .tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px;
   background:var(--surface)}
@@ -429,7 +443,7 @@ async function home() {
     <div class="row" style="margin-bottom:22px">
       <button id="new">New project</button>
     </div>
-    <div id="list"></div></div>`));
+    <div id="list" class="grid"></div></div>`));
   /* Straight into the folder chooser - a screen whose only content is another button
      is a screen nobody needs. Only what comes back gets its own screen. */
   document.getElementById("new").onclick = async (ev) => {
@@ -447,17 +461,17 @@ async function home() {
     const {projects} = await api("/api/projects");
     list.innerHTML = "";
     if (!projects.length) {
-      list.append($(`<div class="empty">No projects yet.<br>
-        Choose <b>New project</b> and point it at a folder of DICOM scans.</div>`));
+      list.append($(`<div class="empty">No projects yet. Point one at a folder of
+        DICOM scans, or at the zip files they came in.</div>`));
       return;
     }
     for (const p of projects) {
-      const c = $(`<div class="card click">
+      const c = $(`<div class="card click pcard">
         <h3>${esc(p.name)}</h3>
-        ${p.description ? `<div style="font-size:16px;margin:2px 0 6px">${
-          esc(p.description)}</div>` : ""}
-        <div class="meta">${p.cases} case${p.cases===1?"":"s"} &middot;
-          ${esc(p.source)} &middot; created ${esc(p.created||"")}</div></div>`);
+        <div class="n">${p.cases} case${p.cases===1?"":"s"}</div>
+        ${p.description ? `<div class="d">${esc(p.description)}</div>` : ""}
+        <div class="meta mono src">${esc(p.source)}</div>
+        <div class="meta">${esc(p.created||"")}</div></div>`);
       c.onclick = () => nav("project", p.name);
       list.append(c);
     }
@@ -512,24 +526,21 @@ async function newProject(preset, into) {
           <label style="display:flex;gap:9px;align-items:flex-start">
             <input type="radio" name="mode" value="move" checked>
             <span><b class="ui">Move</b>
-              <div class="meta">The scans are moved into the project's
-                <span class="mono">scans</span> folder and are no longer in
-                <span class="mono">${esc(home())}</span>. The project becomes the only
-                copy, and everything about a study sits in one place.</div>
+              <div class="meta">The scans leave
+                <span class="mono">${esc(home())}</span>. The project holds the only
+                copy.</div>
             </span></label>
           <label style="display:flex;gap:9px;align-items:flex-start">
             <input type="radio" name="mode" value="link">
             <span><b class="ui">Link</b>
               <div class="meta">The scans stay in
-                <span class="mono">${esc(home())}</span>. The project points at them.</div>
+                <span class="mono">${esc(home())}</span>.</div>
             </span></label>
         </div>
         ${nzip ? `<div class="row" style="margin-top:12px">
-          <span class="meta">Zip files are unpacked into the project either way.</span>
           <label class="ui meta"><input type="checkbox" id="unzdel" checked
-            style="margin-right:6px">delete each zip once it is unpacked</label>
-          <label class="ui meta"><input type="number" id="unzn" min="1" max="16" step="1"
-            value="4" style="width:64px;margin-right:6px">at once</label></div>` : ""}
+            style="margin-right:6px">Delete each zip once it is unpacked</label>
+          </div>` : ""}
         <div class="row" style="margin-top:14px">
           ${into ? "" : `<input type="text" id="pname" placeholder="Project name"
                  style="max-width:280px" value="${esc(home().split(/[\\/]/).pop())}">
@@ -554,7 +565,6 @@ async function newProject(preset, into) {
       document.getElementById("create").onclick = async (ev) => {
         const mode = box.querySelector("input[name=mode]:checked").value;
         const del = box.querySelector("#unzdel");
-        const nw = box.querySelector("#unzn");
         const undo = pending(ev.currentTarget, "Working…");
         const cases = [...cl.querySelectorAll("input:checked")]
           .map(i => JSON.parse(i.dataset.case));
@@ -850,8 +860,8 @@ async function project(name) {
     ckall.indeterminate = vn > 0 && vn < vis.length;
     const hidden = cks.length - vis.length;
     sum.textContent = `${n} of ${cks.length} case(s) ticked`
-      + (hidden ? ` · ${vis.length} shown, ${hidden} hidden by the search`
-                  + ` · every ticked case is run, shown or not` : "");
+      + (hidden ? ` · ${hidden} hidden by the search, and still run if ticked`
+                : "");
   }
   function filterCases() {
     const q = qc.value.trim().toLowerCase();
@@ -1260,10 +1270,7 @@ async function series(name, job, plan, cases) {
     <div class="note amber" id="stally" style="display:none"></div>
     <label class="ui meta" style="display:block;margin-bottom:4px">
       <input type="checkbox" id="onlywait" style="margin-right:6px">
-      show only the ones that need a series chosen</label>
-    <div class="meta" style="margin-bottom:8px">Set aside keeps the case out of this
-      run and unticked next time. It is not a delete, and it does not undo a series
-      you chose - the two are independent.</div>
+      Only the ones that need a series chosen</label>
     <div id="cs" style="max-height:52vh;overflow:auto;border:1px solid var(--line);
       border-radius:10px;padding:10px 12px;background:var(--panel)"></div>
     <div class="row" style="position:sticky;bottom:0;background:var(--bg);
@@ -1418,9 +1425,8 @@ async function series(name, job, plan, cases) {
                    none:'<span class="pill warn">no series found</span>'}[r.decision];
     const card = $(`<div class="card"><div class="row">
       <h3>${esc(cse)}</h3>${badge}
-      <label class="ui meta right" title="Leaves this case out of this run and starts
-it unticked next time. Nothing is deleted, and any series you chose is still saved -
-untick this to bring the case back."><input
+      <label class="ui meta right" title="Leaves this case out. Nothing is deleted and
+your series choice is kept; untick to bring it back."><input
         type="checkbox" class="skipck"> set aside</label></div>
       <div style="display:flex;gap:14px;align-items:flex-start">
         <div style="flex:1;min-width:0;overflow-x:auto">
@@ -1583,18 +1589,26 @@ async function fossa(name, cse) {
   stopPoll(); crumb.textContent = name + " · " + cse;
   view.innerHTML = "";
   view.append($(`<div>
-    <h1>Fossa boundaries</h1>
-    <p class="sub">${esc(cse)} &mdash; skull floor from above. Light is high, dark is
-    deep. Click left to right to draw a boundary.</p>
+    <div class="phead">
+      <div><h1>Fossa boundaries</h1>
+        <p class="sub" style="margin:0">${esc(cse)}</p></div>
+      <div class="row" style="margin-left:auto">
+        <button class="ghost" id="see">View in 2D/3D</button>
+        <button class="quiet" id="back">Back</button></div>
+    </div>
+    <div class="fcols">
+    <div>
     <div class="row" style="margin-bottom:10px">
       <button class="ghost" id="mAnt">Trace anterior</button>
       <button class="ghost" id="mPost">Trace posterior</button>
       <button class="quiet" id="undo">Undo point</button>
       <button class="quiet" id="clear">Clear</button></div>
     <canvas id="cv" width="560" height="560"></canvas>
-    <div class="meta" style="margin:8px 0 16px">magenta = anterior, cyan = posterior
-      &middot; dashed is what the pipeline chose &middot; anterior is up, x is the
-      patient's right</div>
+    <div class="meta" style="margin:8px 0 16px">Skull floor from above, light is high.
+      Click left to right to draw a boundary. Magenta is anterior, cyan is posterior;
+      dashed is what the pipeline chose.</div>
+    </div>
+    <div>
     <div id="vols"></div>
     <fieldset style="border:1px solid var(--line);border-radius:8px;margin:0 0 16px;
                      padding:10px 14px;background:var(--surface)">
@@ -1609,17 +1623,16 @@ async function fossa(name, cse) {
                  style="width:74px;margin-left:6px"></label>
         <span class="meta">degrees</span>
       </div>
-      <div class="meta" style="margin-top:6px">Pitch tips the walls front to back, roll side to side.</div>
+      <div class="meta" style="margin-top:6px">Pitch tips the walls front to back,
+        roll side to side.</div>
     </fieldset>
     <div class="row"><button id="apply">Apply and recompute</button>
-      <button class="ghost" id="drop">Drop corrections</button>
-      <button class="ghost" id="see">View in 2D/3D</button>
-      <button class="quiet" id="back">Back</button></div>
+      <button class="ghost" id="drop">Drop corrections</button></div>
     <div id="fout"></div>
-    <h2>Result</h2>
-    <img id="result" style="max-width:100%;border:1px solid var(--line);
+    <img id="result" style="max-width:100%;margin-top:16px;border:1px solid var(--line);
       border-radius:8px;background:var(--surface)">
     <div id="rout"></div>
+    </div></div>
     </div>`));
   document.getElementById("back").onclick = () => nav("project", name);
   document.getElementById("see").onclick =
