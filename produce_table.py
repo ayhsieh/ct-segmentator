@@ -7,7 +7,8 @@ columns. Three kinds of file, three shapes:
 
   <task>.stats.json     a volume per structure -> <task>_<structure>_volume
   brain_icv.stats.json  brain and intracranial volume -> brain_icv_<name>
-  *fossae_simple.*.json the three fossa compartments -> fossae_<compartment>_<name>
+  *fossae_simple.*.json the three fossa compartments -> fossae_<compartment>_<name>,
+                        and the outside of the skull in mm -> outer_<name>
 
 plus the series number/name and slice count read from the converted NIfTI. Nothing is
 recomputed - this only reads what has already been written, so it is safe to run any
@@ -52,6 +53,11 @@ def read_stats(task, d):
     if task.endswith("fossae_simple") or "compartments" in d:
         if isinstance(d.get("icv_ml"), (int, float)):
             yield ("fossae", "icv_ml"), d["icv_ml"]
+        # the outside of the head, filed on its own so a table of sizes does not have
+        # to carry the compartment volumes to get them
+        for k, v in (d.get("outer_mm") or {}).items():
+            if isinstance(v, (int, float)):
+                yield ("outer", k), v
         for comp, v in (d.get("compartments") or {}).items():
             if not isinstance(v, dict):
                 continue

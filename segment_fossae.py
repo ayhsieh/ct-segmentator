@@ -749,6 +749,98 @@ def head_frame(group, case, seg_out, icv, cereb, sinus, affine, centroid,
     return up, lr, mid, fwd, how, tilt, yaw, dice
 
 
+# ------------------------------------------------- measuring the outside of the head
+def hull_perimeter(pts):
+    """The distance round a set of points the way a tape measure goes.
+
+    A tape pulled round a head bridges every dent rather than dipping into it, so the
+    honest model of a circumference is the convex hull's perimeter and not the true
+    outline's, which would be longer by however rough the surface is."""
+    from scipy.spatial import ConvexHull
+    if len(pts) < 3:
+        return None
+    try:
+        h = ConvexHull(pts)
+    except Exception:
+        return None
+    v = pts[h.vertices]
+    return float(np.linalg.norm(v - np.roll(v, 1, axis=0), axis=1).sum())
+
+
+def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h):
+    """Linear sizes of the outside of the skull, in the head's own frame.
+
+    The outside, because this is what a tape measure and a pair of calipers reach and
+    so what every growth chart and every published index is built from - the volumes
+    next door are measured on the inside and the two must not be mixed up.
+
+    Width, length and height are the extents along the head's own left-right,
+    front-back and vertical axes rather than the scanner's, so a child lying tilted
+    measures the same as one lying straight. The three regional pairs use the fossa
+    compartments' own front-back spans, which makes them the linear description of
+    exactly the regions the volumes describe.
+    """
+    if not Path(skull_p).exists():
+        return None
+    skull = np.asarray(nib.load(str(skull_p)).dataobj) > 0
+    if not skull.any():
+        return None
+    idx = np.argwhere(skull)
+    W = idx @ affine[:3, :3].T + affine[:3, 3]
+    lane = (W - mid) @ lr          # left-right
+    fv = (W - mid) @ fwd           # front-back
+    h = (W - mid) @ up             # vertical
+    del W
+
+    def span(v):
+        return float(v.max() - v.min())
+
+    length = span(fv)
+    width = span(lane)
+    out = {"length_ofd": round(length, 1),
+           "width_bpd": round(width, 1),
+           # from the foramen magnum, where the intracranial volume stops, to the
+           # vertex - the skull mask's own lowest point would be somewhere in the face
+           "height": round(float(h.max() - base_h), 1),
+           "cephalic_index": round(100.0 * width / length, 1) if length else None}
+
+    # the circumference is taken where the head is widest, which is the plane a tape
+    # is put on, and through a slab rather than one voxel row so the outline is whole
+    lo, hi = h.min(), h.max()
+    step = 2.0
+    best = (None, None)
+    for level in np.arange(lo, hi, step):
+        sel = np.abs(h - (level + step / 2)) <= step
+        if sel.sum() < 50:
+            continue
+        w = span(lane[sel])
+        if best[0] is None or w > best[0]:
+            best = (w, sel)
+    if best[1] is not None:
+        out["circumference_ofc"] = (lambda v: round(v, 1) if v else None)(
+            hull_perimeter(np.c_[lane[best[1]], fv[best[1]]]))
+
+    # Anterior, middle and posterior by the same rule that divides the volumes: the
+    # two boundaries are curves that bend from lane to lane, not flat cuts, so each
+    # skull voxel is put on one side or the other of the curve at its own lane. Using
+    # each compartment's overall front-back span instead would give three heavily
+    # overlapping bands and, because a head is widest in the middle, three nearly
+    # identical widths.
+    a_at = PchipInterpolator(lc, ant, extrapolate=False)(np.clip(lane, lc[0], lc[-1]))
+    p_at = PchipInterpolator(lc, post, extrapolate=False)(np.clip(lane, lc[0], lc[-1]))
+    zone = np.full(len(lane), 2, np.uint8)              # middle
+    zone[fv < p_at] = 3                                 # posterior
+    zone[(fv >= p_at) & (fv > a_at)] = 1                # anterior
+    for z, value in (("anterior", 1), ("middle", 2), ("posterior", 3)):
+        sel = zone == value
+        if sel.sum() < 50:
+            continue
+        out[f"{z}_width"] = round(span(lane[sel]), 1)
+        out[f"{z}_height"] = round(float(h[sel].max() - base_h), 1)
+        out[f"{z}_length"] = round(span(fv[sel]), 1)
+    return out
+
+
 # ------------------------------------------------------------------ the picture
 def out_stem(case, name):
     """Output filenames carry the case, e.g. CASE_A_fossae_simple.seg.nrrd.
@@ -1090,6 +1182,16 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
              "compartments": {g: {"ml": round(float((vol == v).sum()) * vml, 1),
                                   "percent_of_icv": round(frac[g], 1)}
                               for g, v in LABEL_VALUES.items()}}
+    # the outside of the same head, in the same frame, over the same three regions
+    lin = outer_measurements(seg_out / "total" / "skull.nii.gz", lc, ant, post,
+                             affine, mid, up, lr, fwd, float(h.min()))
+    if lin:
+        stats["outer_mm"] = lin
+        log("outer: length %.0f  width %.0f  height %.0f  CI %.0f"
+            % (lin["length_ofd"], lin["width_bpd"], lin["height"],
+               lin["cephalic_index"] or 0), 2)
+    else:
+        log("no total/skull mask - outer measurements skipped", 2)
     if frac["anterior_fossa"] > 30 or frac["anterior_fossa"] < 5 \
             or frac["middle_fossa"] < 10 or frac["posterior_fossa"] < 20:
         stats["warning"] = "implausible compartment fractions"

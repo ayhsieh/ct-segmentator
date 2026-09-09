@@ -767,8 +767,11 @@ def job_segment(project, cases, tasks, device, license_no, force):
 # What an analysis reads before it computes anything: the brain structure maps, and the
 # brain ROI from total, which gives the foramen magnum floor. Each entry is the task to
 # run, the extra arguments it needs, and the file that proves it has already been run.
-PREREQS = [("brain_structures", [], "brain_structures/*.nii.gz"),
-           ("total", ["--roi-subset", "brain"], "total/brain.nii.gz")]
+PREREQS = [("brain_structures", [], ["brain_structures/*.nii.gz"]),
+           # brain for the foramen-magnum cut, skull for the outside measurements.
+           # Both come out of one pass, so asking for the second costs nothing.
+           ("total", ["--roi-subset", "brain", "skull"],
+            ["total/brain.nii.gz", "total/skull.nii.gz"])]
 
 
 def job_analysis(project, kind, cases, device, license_no=""):
@@ -786,8 +789,8 @@ def job_analysis(project, kind, cases, device, license_no=""):
     seg = seg_dir_for(project)
     steps = []
     for case in cases:
-        for task, extra, proof in PREREQS:
-            if list((seg / case).glob(proof)):
+        for task, extra, proofs in PREREQS:
+            if all(list((seg / case).glob(p)) for p in proofs):
                 continue
             argv = PY + ["segment_structures.py", str(case_dir(project, case)),
                          "--group-name", project, "--task", task,
@@ -822,7 +825,8 @@ def job_table(project, select=None):
 
 LABELS = {"brain_icv": "brain and intracranial volume",
           "fossae": "cranial fossae", "total": "whole body",
-          "brain_structures": "brain structures"}
+          "brain_structures": "brain structures",
+          "outer": "outside of the skull, in mm"}
 
 
 def table_columns(project):
