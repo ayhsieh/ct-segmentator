@@ -1008,9 +1008,12 @@ async function series(name, job, plan, cases) {
     <h1>${plan ? "Checking the scans" : "Which series?"}</h1>
     <div id="snote"></div>
     <div class="note amber" id="stally" style="display:none"></div>
-    <label class="ui meta" style="display:block;margin-bottom:8px">
+    <label class="ui meta" style="display:block;margin-bottom:4px">
       <input type="checkbox" id="onlywait" style="margin-right:6px">
       show only the ones that need a series chosen</label>
+    <div class="meta" style="margin-bottom:8px">Set aside keeps the case out of this
+      run and unticked next time. It is not a delete, and it does not undo a series
+      you chose - the two are independent.</div>
     <div id="cs" style="max-height:52vh;overflow:auto;border:1px solid var(--line);
       border-radius:10px;padding:10px 12px;background:var(--panel)"></div>
     <div class="row" style="position:sticky;bottom:0;background:var(--bg);
@@ -1165,7 +1168,9 @@ async function series(name, job, plan, cases) {
                    none:'<span class="pill warn">no series found</span>'}[r.decision];
     const card = $(`<div class="card"><div class="row">
       <h3>${esc(cse)}</h3>${badge}
-      <label class="ui meta right" title="leave this case out of the run"><input
+      <label class="ui meta right" title="Leaves this case out of this run and starts
+it unticked next time. Nothing is deleted, and any series you chose is still saved -
+untick this to bring the case back."><input
         type="checkbox" class="skipck"> set aside</label></div>
       <div style="display:flex;gap:14px;align-items:flex-start">
         <div style="flex:1;min-width:0;overflow-x:auto">
