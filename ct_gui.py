@@ -774,6 +774,22 @@ PREREQS = [("brain_structures", [], ["brain_structures/*.nii.gz"]),
             ["total/brain.nii.gz", "total/skull.nii.gz"])]
 
 
+def prereq_steps(project, cases):
+    """(case, task, extra) for every prerequisite a run would have to segment first.
+
+    One answer, used twice: to build the steps, and to decide whether a licence number
+    is needed. Asked separately they drifted, and the interface demanded a licence for
+    a run whose licensed mask every case already had."""
+    seg = seg_dir_for(project)
+    out = []
+    for case in cases:
+        for task, extra, proofs in PREREQS:
+            if all(list((seg / case).glob(pat)) for pat in proofs):
+                continue
+            out.append((case, task, extra))
+    return out
+
+
 def job_analysis(project, kind, cases, device, license_no=""):
     """Segment everything the analysis will need, then analyse.
 
@@ -786,18 +802,14 @@ def job_analysis(project, kind, cases, device, license_no=""):
     and attributable besides.
     """
     spec = ANALYSES[kind]
-    seg = seg_dir_for(project)
     steps = []
-    for case in cases:
-        for task, extra, proofs in PREREQS:
-            if all(list((seg / case).glob(p)) for p in proofs):
-                continue
-            argv = PY + ["segment_structures.py", str(case_dir(project, case)),
-                         "--group-name", project, "--task", task,
-                         "--skip-planning", "--device", device] + extra
-            if license_no and task in LICENSED_TASKS:
-                argv += ["--license-number", license_no]
-            steps.append((f"{case} - {task}", argv))
+    for case, task, extra in prereq_steps(project, cases):
+        argv = PY + ["segment_structures.py", str(case_dir(project, case)),
+                     "--group-name", project, "--task", task,
+                     "--skip-planning", "--device", device] + extra
+        if license_no and task in LICENSED_TASKS:
+            argv += ["--license-number", license_no]
+        steps.append((f"{case} - {task}", argv))
     for case in cases:
         argv = PY + [spec["script"], "--group", project, "--case", case,
                      "--device", device]
@@ -2192,10 +2204,13 @@ class Handler(BaseHTTPRequestHandler):
                 analyses = body.get("analyses") or []
                 device = body.get("device", "gpu")
                 lic = (body.get("license") or "").strip()
-                # an analysis segments its own prerequisites, and one of those
-                # is licensed, so asking for it is asking for that too
-                wanted = set(tasks) | ({t for t, _, _ in PREREQS} if analyses
-                                       else set())
+                # an analysis segments its own prerequisites, so asking for one can
+                # be asking for a licensed task too - but only when a case is actually
+                # missing it, which is why this asks what would run rather than what
+                # could
+                wanted = set(tasks)
+                if analyses:
+                    wanted |= {t for _, t, _ in prereq_steps(name, cases)}
                 need_lic = [t for t in sorted(wanted) if t in LICENSED_TASKS]
                 if need_lic and not lic and not license_stored():
                     return self._json({"error": "these need a license number: "
