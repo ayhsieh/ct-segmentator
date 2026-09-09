@@ -138,8 +138,27 @@ tr.sel td{background:var(--accentdim)}
   vertical-align:-2px;margin-right:7px}
 .spin.dark{border:2px solid #0002;border-top-color:var(--mid)}
 @keyframes sp{to{transform:rotate(360deg)}}
-.bar{height:4px;background:var(--panel);border-radius:99px;overflow:hidden;margin:10px 0}
+.bar{height:6px;background:var(--panel);border-radius:99px;overflow:hidden;margin:10px 0}
 .bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+
+/* A run, step by step. Each row says what it is and where it has got to; the log is
+   the same information at a hundred times the length, so it waits behind a toggle. */
+.steps{max-height:min(46vh,420px);overflow:auto;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface)}
+.step{display:flex;align-items:center;gap:11px;padding:7px 14px;
+  font-family:var(--sans);font-size:14px;border-bottom:1px solid #ece6da}
+.step:last-child{border-bottom:0}
+.step .dot{width:8px;height:8px;border-radius:99px;background:var(--edge);flex:none}
+.step .when{color:var(--faint);font-size:12px}
+.step.wait{color:var(--faint)}
+.step.done .dot{background:var(--accent)}
+.step.done .what{color:var(--mid)}
+.step.now{background:var(--accentdim);font-weight:600}
+.step.now .dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
+.step.fail .dot{background:var(--warn)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.termtoggle{display:block;margin:14px 0 8px;cursor:pointer}
+#log.hide{display:none}
 .tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px;
   background:var(--surface)}
 
@@ -1115,61 +1134,117 @@ function running(name, jobs) {
   stopPoll(); crumb.textContent = name + " · running";
   LIVE_ON = true; liveBar();   /* this screen is the bar, so the bar stands down */
   view.innerHTML = "";
-  view.append($(`<div>
-    <h1>Working</h1>
-    <p class="sub" id="head">Starting…</p>
+  /* What a run looks like, rather than what it prints. The log is the truth and it
+     stays one click away, but a person waiting on three hundred cases wants to know
+     how far along it is and roughly how long is left - not to read nnU-Net's stdout. */
+  view.append($(`<div class="reading">
+    <h1 id="head">Starting</h1>
+    <p class="sub" id="sub">&nbsp;</p>
     <div class="bar"><i id="bar" style="width:0%"></i></div>
-    <div class="row" style="margin-bottom:14px">
+    <div class="row" style="margin:10px 0 20px;flex-wrap:nowrap">
       <button class="ghost" id="cancel">Stop</button>
       <button class="quiet" id="back">Back to project</button>
-      <span class="right meta" id="clock"></span></div>
-    <div id="log"></div></div>`));
-  const log = document.getElementById("log");
-  document.getElementById("back").onclick = () => nav("project", name);
+      <span class="meta" style="margin-left:auto;white-space:nowrap"
+        ><span id="clock"></span><span id="eta"></span></span>
+    </div>
+    <div id="steps" class="steps"></div>
+    <label class="ui meta termtoggle">
+      <input type="checkbox" id="showlog"> Show terminal output</label>
+    <div id="log" class="hide"></div>
+    <div id="doneline"></div></div>`));
+  const log = g("log"), steps = g("steps");
+  g("showlog").onchange = (e) => {
+    log.classList.toggle("hide", !e.target.checked);
+    if (e.target.checked) log.scrollTop = log.scrollHeight;
+  };
+  g("back").onclick = () => nav("project", name);
   let cur = 0;
-  document.getElementById("cancel").onclick = async (ev) => {
+  g("cancel").onclick = async (ev) => {
     const undo = pending(ev.currentTarget, "Stopping…");
     try { await api("/api/job/cancel", {id: jobs[cur]}); } catch {}
     undo();
   };
+
+  /* One row per step, drawn once and then only its state changes. The server counts
+     steps for us - step_i, step_n and step_label in the job snapshot - so this is a
+     reading of what is already there, not a second tally that could disagree. */
+  let rows = [], names = [], at0 = [], done = 0, lastStep = 0, spent = 0;
+  function drawSteps(s) {
+    if (rows.length !== s.steps) {
+      steps.innerHTML = "";
+      rows = []; names = []; at0 = [];
+      for (let i = 0; i < s.steps; i++) {
+        const r = $(`<div class="step"><span class="dot"></span>
+          <span class="what"></span><span class="right when"></span></div>`);
+        steps.append(r);
+        rows.push(r);
+      }
+    }
+    /* The snapshot names only the step running now, so each name is kept as it goes
+       past - otherwise a finished step forgets which case it was. */
+    if (s.step_label) names[s.step - 1] = s.step_label;
+    if (at0[s.step - 1] === undefined) at0[s.step - 1] = s.elapsed;
+    for (let i = 0; i < rows.length; i++) {
+      const state = i + 1 < s.step ? "done" : i + 1 === s.step ? "now" : "wait";
+      rows[i].className = "step " + state;
+      rows[i].querySelector(".what").textContent = names[i] || "Step " + (i + 1);
+      const took = state === "done" && at0[i] !== undefined && at0[i + 1] !== undefined
+        ? fmtTime(at0[i + 1] - at0[i]) : "";
+      rows[i].querySelector(".when").textContent = took;
+    }
+    const at = rows[s.step - 1];
+    if (at) at.scrollIntoView({block: "nearest"});
+  }
+
   /* a ticking clock is what separates "working" from "frozen" when TotalSegmentator
      goes quiet for minutes at a time */
   let t0 = Date.now();
   if (CLOCK) clearInterval(CLOCK);   /* one ticker, however many times this is opened */
   CLOCK = setInterval(() => {
-    const el = document.getElementById("clock");
+    const el = g("clock");
     if (el && el.dataset.live === "1")
       el.textContent = fmtTime((Date.now() - t0) / 1000);
   }, 1000);
 
   (async () => {
     for (let i = 0; i < jobs.length; i++) {
-      cur = i; t0 = Date.now();
-      const clock = document.getElementById("clock");
+      cur = i; t0 = Date.now(); done = 0; lastStep = 0; spent = 0;
+      const clock = g("clock");
       if (clock) clock.dataset.live = "1";
       await follow(jobs[i], (s) => {
         const q = s.state === "queued";
-        document.getElementById("head").innerHTML = q
-          ? `<span class="spin dark"></span>Queued &mdash; waiting for another job to finish`
-          : `${esc(s.label)} &mdash; step ${s.step} of ${s.steps}` +
-            (s.step_label ? ` &middot; <b>${esc(s.step_label)}</b>` : "");
-        document.getElementById("bar").style.width =
-          (s.steps ? 100 * s.step / s.steps : 0) + "%";
+        g("head").textContent = q ? "Waiting to start" : s.label;
+        g("sub").innerHTML = q
+          ? `<span class="spin dark"></span>Another job is running first`
+          : `Step ${s.step} of ${s.steps}`
+            + (s.step_label ? ` &middot; <b>${esc(s.step_label)}</b>` : "");
+        g("bar").style.width = (s.steps ? 100 * (s.step - 1) / s.steps : 0) + "%";
+        if (!q) drawSteps(s);
+        /* Time left from how long the finished steps actually took, not from a guess.
+           Nothing is shown until two are done, because one step is not a rate. */
+        if (s.step > lastStep) { spent = s.elapsed; done = s.step - 1; lastStep = s.step; }
+        const el = g("eta");
+        if (el) el.textContent = done >= 2 && s.state === "running"
+          ? " · about " + fmtTime((s.steps - done) * (spent / done)) + " left" : "";
         for (const line of s.lines || []) {
           const cls = line.startsWith("$ ") ? "cmd"
                     : /error|fail|traceback|!!/i.test(line) ? "bad" : "";
           log.append($(`<div class="${cls}">${esc(line)}</div>`));
         }
-        if (s.lines && s.lines.length) log.scrollTop = log.scrollHeight;
+        if (s.lines && s.lines.length && !log.classList.contains("hide"))
+          log.scrollTop = log.scrollHeight;
       });
-      const clock2 = document.getElementById("clock");
+      const clock2 = g("clock");
       if (clock2) clock2.dataset.live = "0";
     }
-    document.getElementById("head").textContent = "Finished.";
-    document.getElementById("bar").style.width = "100%";
-    const b = $(`<button style="margin-top:14px">See results</button>`);
+    g("head").textContent = "Finished";
+    g("sub").textContent = "";
+    g("eta").textContent = "";
+    g("bar").style.width = "100%";
+    for (const r of rows) r.className = "step done";
+    const b = $(`<button style="margin-top:18px">See results</button>`);
     b.onclick = () => nav("project", name);
-    document.getElementById("log").after(b);
+    g("doneline").append(b);
   })();
 }
 
