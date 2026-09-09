@@ -1153,7 +1153,8 @@ def write_pick(link_path, series_dir, snum, desc):
     depends on how it got there. Paths inside this checkout are recorded relative to it,
     so moving or copying the whole folder keeps every choice.
     """
-    from ct_paths import load_cache, cache_get, cache_keys, anchored, CACHE_FILE
+    from ct_paths import (load_cache, cache_get, cache_keys, anchored, unanchored,
+                          CACHE_FILE)
     link = Path(link_path)
     entry = {"snum": str(snum), "desc": desc,
              "series_dir": anchored(series_dir)}
@@ -1169,10 +1170,21 @@ def write_pick(link_path, series_dir, snum, desc):
         tmp = CACHE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(cache, indent=2), encoding="utf-8")
         os.replace(tmp, CACHE_FILE)
-    # whether this actually changes anything, so a choice that only confirms what was
-    # already recorded does not throw away the conversion made from it
-    changed = not before or before.get("series_dir") != entry["series_dir"] \
-        or str(before.get("snum")) != entry["snum"]
+    # Whether this actually changes anything, so a choice that only confirms what was
+    # already recorded does not throw away the conversion made from it. Compared as
+    # places, not as text: one folder has several spellings - relative or absolute,
+    # through a junction or through its target - and an older entry often holds a
+    # different one, so comparing the strings made re-confirming a choice look like
+    # changing it and deleted a conversion that was still correct.
+    def where(v):
+        try:
+            return unanchored(v).resolve()
+        except (OSError, ValueError, TypeError):
+            return None
+
+    was = where((before or {}).get("series_dir"))
+    changed = (not before or was is None or was != where(entry["series_dir"])
+               or str(before.get("snum")) != entry["snum"])
     return entry, changed
 
 
@@ -1926,12 +1938,20 @@ class Handler(BaseHTTPRequestHandler):
             raise RuntimeError(f"unknown project: {name}")
         return name
 
-    def _case(self, q):
-        """A case name that is a name, not a path. Everything built from it is joined
-        onto the project's own folders, so a stray slash must not get through."""
-        case = q.get("case", "")
-        if not SAFE_NAME.match(case):
-            raise RuntimeError(f"not a case name: {case!r}")
+    def _case(self, q, project):
+        """A case the project actually has.
+
+        Checked against the project's own register rather than against a pattern of
+        allowed characters. Everything built from the name is joined onto the project's
+        folders, so it must not be a path - and a name that is one of the project's own
+        cases cannot be. The pattern had to guess which characters were safe and guessed
+        wrong: real case names carry brackets, from folders imported under a name that
+        was already taken.
+        """
+        case = (q.get("case") or "")
+        pr = load_project(project) or {}
+        if not any(c["case"] == case for c in pr.get("cases", [])):
+            raise RuntimeError(f"no case {case!r} in {project}")
         return case
 
     def do_GET(self):
@@ -2019,14 +2039,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, hits[0].read_bytes(), "image/png")
             if u.path == "/api/view/case":
                 try:
-                    return self._json(view_case(self._project(q), self._case(q)))
+                    name = self._project(q)
+                    return self._json(view_case(name, self._case(q, name)))
                 except NeedsConvert as e:
                     # Not an error so much as a next step, and the page offers it.
                     return self._json({"error": str(e), "needs_convert": True}, 409)
             if u.path == "/api/view/slice.png":
                 plane = q.get("plane", "axial")
+                name = self._project(q)
                 png = view_slice_png(
-                    self._project(q), self._case(q),
+                    name, self._case(q, name),
                     plane if plane in PLANES else "axial",
                     _qint(q, "i", 0), _qint(q, "ww", 2500), _qint(q, "wl", 480),
                     _qint(q, "op", 45), _parse_visible(q.get("v", "")))
@@ -2035,7 +2057,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, png, "image/png",
                                   {"Cache-Control": "private, max-age=300"})
             if u.path == "/api/series/preview.png":
-                d = series_under_case(self._project(q), self._case(q),
+                name = self._project(q)
+                d = series_under_case(name, self._case(q, name),
                                       q.get("path", ""))
                 png, n = series_preview_png(d, _qint(q, "i", 0),
                                             _qint(q, "ww", 2500), _qint(q, "wl", 480))
@@ -2043,12 +2066,14 @@ class Handler(BaseHTTPRequestHandler):
                                   {"Cache-Control": "private, max-age=300",
                                    "X-Slices": str(n)})
             if u.path == "/api/series/info":
-                d = series_under_case(self._project(q), self._case(q),
+                name = self._project(q)
+                d = series_under_case(name, self._case(q, name),
                                       q.get("path", ""))
                 return self._json({"slices": len(_series_files(d)),
                                    "presets": WINDOW_PRESETS})
             if u.path == "/api/view/mesh.bin":
-                blob = view_mesh(self._project(q), self._case(q),
+                name = self._project(q)
+                blob = view_mesh(name, self._case(q, name),
                                  q.get("task", ""), _qint(q, "i", -1))
                 # Already gzipped by view_mesh, so the browser is told to inflate it.
                 return self._send(200, blob, "application/octet-stream",
@@ -2166,14 +2191,12 @@ class Handler(BaseHTTPRequestHandler):
 
             if u.path == "/api/convert":
                 name = self._project(body)
-                case = body.get("case", "")
-                if not SAFE_NAME.match(case):
-                    return self._json({"error": f"not a case name: {case!r}"}, 400)
+                case = self._case(body, name)
                 return self._json({"job": submit(job_convert(name, [case])).id})
 
             if u.path == "/api/series/pick":
                 name = self._project(body)
-                case = body["case"]
+                case = self._case(body, name)
                 entry, changed = write_pick(case_dir(name, case), body["series_dir"],
                                             body["snum"], body.get("desc", ""))
                 cleared = clear_converted(name, case) if changed else 0
@@ -2192,7 +2215,8 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get("what") == "scans":
                     return self._json({"opened": reveal(scans_root(name))})
                 base = seg_dir_for(name)
-                case, f = body.get("case") or "", body.get("file") or ""
+                case = self._case(body, name) if body.get("case") else ""
+                f = body.get("file") or ""
                 target = base / case / f if case else base / f
                 return self._json({"opened": reveal(target)})
 
@@ -2243,7 +2267,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/fossa/apply":
                 name = self._project(body)
                 return self._json({"job": submit(
-                    job_fossa_apply(name, body["case"], body.get("edits"))).id})
+                    job_fossa_apply(name, self._case(body, name),
+                                    body.get("edits"))).id})
 
             return self._json({"error": "not found"}, 404)
         except Exception as e:
