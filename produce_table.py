@@ -56,7 +56,7 @@ def read_stats(task, d):
         # the outside of the head, filed on its own so a table of sizes does not have
         # to carry the compartment volumes to get them
         for k, v in (d.get("outer_mm") or {}).items():
-            if isinstance(v, (int, float)):
+            if isinstance(v, (int, float)):     # "points" is coordinates, not a number
                 yield ("outer", k), v
         for comp, v in (d.get("compartments") or {}).items():
             if not isinstance(v, dict):

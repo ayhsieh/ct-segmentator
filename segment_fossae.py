@@ -767,18 +767,27 @@ def hull_perimeter(pts):
     return float(np.linalg.norm(v - np.roll(v, 1, axis=0), axis=1).sum())
 
 
+MIDLINE_MM = 5.0        # half-thickness of the slab that counts as the midsagittal plane
+
+
 def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h):
-    """Linear sizes of the outside of the skull, in the head's own frame.
+    """The skull measured from outside, to the craniometric definitions.
 
-    The outside, because this is what a tape measure and a pair of calipers reach and
-    so what every growth chart and every published index is built from - the volumes
-    next door are measured on the inside and the two must not be mixed up.
+    Maximum cranial length is "the straight-line distance from glabella to
+    opisthocranion in the midsagittal plane", so it is taken in a thin slab about the
+    midline and not as the longest span anywhere - a temporal bulge is not glabella.
 
-    Width, length and height are the extents along the head's own left-right,
-    front-back and vertical axes rather than the scanner's, so a child lying tilted
-    measures the same as one lying straight. The three regional pairs use the fossa
-    compartments' own front-back spans, which makes them the linear description of
-    exactly the regions the volumes describe.
+    Maximum cranial breadth is "the maximum width of the skull perpendicular to the
+    mid-sagittal plane wherever it is located", excluding the inferior temporal line
+    and what surrounds it: the posterior roots of the zygomatic arches and the
+    supramastoid crest. Nothing is cut out here to enforce that, because on this
+    pipeline's skull mask there is nothing to cut - the mask is the braincase, and the
+    width profile rises from the base to a single peak between a third and three fifths
+    of the way up. An arch winning would show as a peak near the floor, so the height
+    of the peak is recorded and flagged rather than a threshold being invented.
+
+    Every measurement records the two points it was taken between, in the scan's own
+    world coordinates, so it can be drawn, checked, or moved by hand later.
     """
     if not Path(skull_p).exists():
         return None
@@ -787,57 +796,126 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
         return None
     idx = np.argwhere(skull)
     W = idx @ affine[:3, :3].T + affine[:3, 3]
-    lane = (W - mid) @ lr          # left-right
-    fv = (W - mid) @ fwd           # front-back
-    h = (W - mid) @ up             # vertical
-    del W
+    lane = (W - mid) @ lr          # left-right, positive one way
+    fv = (W - mid) @ fwd           # front-back, positive forwards
+    h = (W - mid) @ up             # up
 
-    def span(v):
-        return float(v.max() - v.min())
+    pts = {}
 
-    length = span(fv)
-    width = span(lane)
+    def keep(name, i):
+        pts[name] = [round(float(v), 2) for v in W[i]]
+        return i
+
+    # ---- breadth: the widest level, and the two points across it.
+    # Level by level rather than the widest pair anywhere, because the arms of a
+    # spreading caliper are held horizontally on the parietal bones: two points ten
+    # millimetres apart in height are not a width anyone could take or draw. The same
+    # level is the plane a tape goes round, so this one search answers both.
+    step = 2.0
+    lo, hi = h.min(), h.max()
+    best = None
+    for level in np.arange(lo, hi, step):
+        sel = np.flatnonzero(np.abs(h - (level + step / 2)) <= step)
+        if len(sel) < 50:
+            continue
+        w = float(lane[sel].max() - lane[sel].min())
+        if best is None or w > best[0]:
+            best = (w, sel, level + step / 2)
+    if best is None:
+        return None
+    width, wide, peak_h = best
+    # The width is flat near its peak, so the single furthest voxel on each side lands
+    # anywhere along a near-tie - on this head eighteen millimetres apart front to back,
+    # which measures correctly and draws as a diagonal across the brain. The distance is
+    # the perpendicular one either way; the pair reported is the one that also sits
+    # level front to back, so the line is the one a caliper would make.
+    lo_side = wide[lane[wide] <= lane[wide].min() + 0.5]
+    hi_side = wide[lane[wide] >= lane[wide].max() - 0.5]
+    gap = np.abs(fv[lo_side][:, None] - fv[hi_side][None, :])
+    x, y = np.unravel_index(int(np.argmin(gap)), gap.shape)
+    li, ri = int(lo_side[x]), int(hi_side[y])
+    keep("euryon_a", li)
+    keep("euryon_b", ri)
+    # where the peak sits up the vault: near the floor would mean an arch won
+    up_frac = (peak_h - lo) / (hi - lo) if hi > lo else None
+
+    # ---- length: in the midsagittal plane, glabella to opisthocranion
+    near = np.abs(lane) <= MIDLINE_MM
+    if near.sum() < 50:                       # a thin slab found nothing; widen once
+        near = np.abs(lane) <= 3 * MIDLINE_MM
+    mid_i = np.flatnonzero(near)
+    gi = int(mid_i[np.argmax(fv[near])])
+    oi = int(mid_i[np.argmin(fv[near])])
+    keep("glabella", gi)
+    keep("opisthocranion", oi)
+    length = float(np.linalg.norm(W[gi] - W[oi]))
+
+    # ---- height: the foramen magnum, where the intracranial volume stops, to the vertex
+    vi = int(np.argmax(h))
+    keep("vertex", vi)
+    height = float(h[vi] - base_h)
+    # the foot of that height, straight down the head's own vertical from the vertex,
+    # so the measurement can be drawn as the line it is rather than inferred
+    pts["height_foot"] = [round(float(v), 2)
+                          for v in (W[vi] - (h[vi] - base_h) * up)]
+
     out = {"length_ofd": round(length, 1),
            "width_bpd": round(width, 1),
-           # from the foramen magnum, where the intracranial volume stops, to the
-           # vertex - the skull mask's own lowest point would be somewhere in the face
-           "height": round(float(h.max() - base_h), 1),
-           "cephalic_index": round(100.0 * width / length, 1) if length else None}
+           "height": round(height, 1),
+           "cephalic_index": round(100.0 * width / length, 1) if length else None,
+           "width_height_up_fraction": round(up_frac, 3) if up_frac is not None else None}
+    if up_frac is not None and up_frac < 0.15:
+        out["warning"] = ("the widest point sits low on the skull - check that it is "
+                          "on the vault and not a zygomatic root or the mastoid")
 
-    # the circumference is taken where the head is widest, which is the plane a tape
-    # is put on, and through a slab rather than one voxel row so the outline is whole
-    lo, hi = h.min(), h.max()
-    step = 2.0
-    best = (None, None)
-    for level in np.arange(lo, hi, step):
-        sel = np.abs(h - (level + step / 2)) <= step
-        if sel.sum() < 50:
-            continue
-        w = span(lane[sel])
-        if best[0] is None or w > best[0]:
-            best = (w, sel)
-    if best[1] is not None:
-        out["circumference_ofc"] = (lambda v: round(v, 1) if v else None)(
-            hull_perimeter(np.c_[lane[best[1]], fv[best[1]]]))
+    # ---- point of maximum width: how far back the widest point sits, as a fraction of
+    # the length. In sagittal synostosis it sits too far forward, and it moves back to
+    # the normal place after surgery - and it barely tracks the cephalic index, so it
+    # says something that number does not. (PMC4090594)
+    span = float(fv[gi] - fv[oi])
+    if span > 0:
+        peak_f = float((fv[li] + fv[ri]) / 2)
+        out["point_of_max_width"] = round((fv[gi] - peak_f) / span, 3)
 
-    # Anterior, middle and posterior by the same rule that divides the volumes: the
-    # two boundaries are curves that bend from lane to lane, not flat cuts, so each
+    # ---- circumference round that same widest level
+    c = hull_perimeter(np.c_[lane[wide], fv[wide]])
+    if c:
+        out["circumference_ofc"] = round(c, 1)
+
+    # ---- Anterior, middle and posterior by the same rule that divides the volumes:
+    # the two boundaries are curves that bend from lane to lane, not flat cuts, so each
     # skull voxel is put on one side or the other of the curve at its own lane. Using
     # each compartment's overall front-back span instead would give three heavily
     # overlapping bands and, because a head is widest in the middle, three nearly
     # identical widths.
-    a_at = PchipInterpolator(lc, ant, extrapolate=False)(np.clip(lane, lc[0], lc[-1]))
-    p_at = PchipInterpolator(lc, post, extrapolate=False)(np.clip(lane, lc[0], lc[-1]))
+    clipped = np.clip(lane, lc[0], lc[-1])
+    a_at = PchipInterpolator(lc, ant, extrapolate=False)(clipped)
+    p_at = PchipInterpolator(lc, post, extrapolate=False)(clipped)
     zone = np.full(len(lane), 2, np.uint8)              # middle
     zone[fv < p_at] = 3                                 # posterior
     zone[(fv >= p_at) & (fv > a_at)] = 1                # anterior
     for z, value in (("anterior", 1), ("middle", 2), ("posterior", 3)):
-        sel = zone == value
-        if sel.sum() < 50:
+        sel = np.flatnonzero(zone == value)
+        if len(sel) < 50:
             continue
-        out[f"{z}_width"] = round(span(lane[sel]), 1)
-        out[f"{z}_height"] = round(float(h[sel].max() - base_h), 1)
-        out[f"{z}_length"] = round(span(fv[sel]), 1)
+        zl = sel[int(np.argmin(lane[sel]))]
+        zr = sel[int(np.argmax(lane[sel]))]
+        zt = sel[int(np.argmax(h[sel]))]
+        keep(f"{z}_width_a", zl)
+        keep(f"{z}_width_b", zr)
+        keep(f"{z}_vertex", zt)
+        out[f"{z}_width"] = round(float(lane[zr] - lane[zl]), 1)
+        out[f"{z}_height"] = round(float(h[zt] - base_h), 1)
+        out[f"{z}_length"] = round(float(fv[sel].max() - fv[sel].min()), 1)
+
+    out["points"] = pts
+    # The axes every one of these was taken along. Without them a viewer can only draw
+    # the endpoints on scanner-aligned slices, where a head tilted two degrees puts the
+    # two ends of a width six millimetres apart and the line misses the bone it touches.
+    out["frame"] = {"origin": [round(float(v), 3) for v in mid],
+                    "left_right": [round(float(v), 4) for v in lr],
+                    "forward": [round(float(v), 4) for v in fwd],
+                    "up": [round(float(v), 4) for v in up]}
     return out
 
 
