@@ -27,14 +27,73 @@ h3{font-size:16px;margin:0 0 4px;font-weight:600}
 p{margin:0 0 14px;color:var(--ink)}
 .sub{color:var(--mid);font-size:17px;margin:0 0 26px}
 a{color:inherit}
-header{border-bottom:1px solid var(--line);padding:14px 0;margin-bottom:34px}
-header .in{max-width:840px;margin:0 auto;padding:0 22px;display:flex;
-  align-items:center;gap:14px}
-.brand{font-family:var(--sans);font-weight:700;letter-spacing:-.02em;font-size:19px;
-  cursor:pointer}
+/* Two panes, each scrolling on its own. The page itself never scrolls: what you can
+   act on stays where you left it, and only the list you are reading moves. */
+body{height:100vh;overflow:hidden;display:grid;grid-template-columns:230px 1fr}
+body.railed{grid-template-columns:56px 1fr}
+#side{background:var(--panel);border-right:1px solid var(--edge);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#side .top{display:flex;align-items:center;gap:9px;padding:15px 14px 11px}
+.brand{font-family:var(--sans);font-weight:700;letter-spacing:-.02em;font-size:17px;
+  cursor:pointer;white-space:nowrap;overflow:hidden}
 .brand:hover{opacity:.7}
+#rail{margin-left:auto;border:0;background:none;color:var(--faint);cursor:pointer;
+  padding:4px 6px;font-size:15px;line-height:1}
+#rail:hover{color:var(--ink);opacity:1}
+.sidehead{font-family:var(--sans);font-size:11px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--faint);padding:12px 14px 5px;
+  display:flex;align-items:center;gap:6px}
+.sidehead button{margin-left:auto;padding:0 5px;font-size:16px;line-height:1;
+  border:0;background:none;color:var(--faint)}
+.sidehead button:hover{color:var(--ink);opacity:1}
+#plist{overflow:auto;flex:1;min-height:0;padding:0 8px}
+.pitem{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px;
+  font-family:var(--sans);font-size:14px;cursor:pointer;color:var(--ink);
+  white-space:nowrap;overflow:hidden}
+.pitem:hover{background:var(--surface)}
+.pitem.on{background:var(--accentdim);color:var(--accent);font-weight:600}
+.pitem .n{margin-left:auto;color:var(--faint);font-size:12px}
+.pitem.on .n{color:var(--accent)}
+.pinit{display:none;width:26px;height:26px;border-radius:6px;background:var(--edge);
+  color:var(--surface);font-size:11px;font-weight:700;align-items:center;
+  justify-content:center;flex:none}
+#sfoot{border-top:1px solid var(--edge);padding:10px 14px 14px}
+#sfoot label{display:block;font-family:var(--sans);font-size:11px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--faint);margin:8px 0 3px}
+#sfoot select{width:100%;font-family:var(--sans);font-size:13px;padding:5px 7px;
+  border:1px solid var(--edge);border-radius:6px;background:var(--surface);
+  color:var(--ink)}
+/* collapsed: initials only, and everything that needs width steps out */
+body.railed .brand,body.railed .sidehead span,body.railed .sidehead button,
+body.railed .pitem .name,body.railed .pitem .n,body.railed #sfoot{display:none}
+body.railed .pinit{display:flex}
+body.railed .pitem{justify-content:center;padding:6px}
+body.railed #side .top{justify-content:center;padding:15px 0 11px}
+body.railed #rail{margin:0}
 .crumb{color:var(--faint);font-family:var(--sans);font-size:14px}
-main{max-width:840px;margin:0 auto;padding:0 22px 90px}
+main{overflow:auto;min-height:0;padding:26px 30px 90px}
+main>#view{max-width:1180px}
+/* Prose wants a short line; a table of three hundred cases wants the room. */
+.reading{max-width:660px}
+
+/* Project page. The header is a row, not a stack, so the actions sit beside the name
+   instead of pushing the content down. */
+.phead{display:flex;align-items:flex-start;gap:20px;margin-bottom:2px}
+.phead h1{margin:0}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:22px 0 18px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;
+  color:var(--mid);font-size:15px;padding:8px 14px;margin-bottom:-1px}
+.tab:hover:not(.on){color:var(--ink);opacity:1;background:none}
+.tab.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.pane.hide{display:none}
+/* Structures and analyses side by side: both are lists you scan, and stacked they put
+   the start button off the bottom of the screen. */
+.runcols{display:grid;grid-template-columns:1fr 340px;gap:22px;align-items:start}
+.runcols .tasklist{max-height:min(52vh,460px)}
+.lbl{font-family:var(--sans);font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--faint);margin:0 0 7px}
+.runbar{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+@media (max-width:980px){.runcols{grid-template-columns:1fr}}
 button{font-size:14px;font-weight:500;padding:8px 16px;border-radius:99px;
   border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;
   transition:opacity .15s}
@@ -184,12 +243,26 @@ body.livebar{padding-bottom:64px}
 </style>
 </head>
 <body>
-<header><div class="in">
-  <span class="brand" id="brand" title="back to your projects">CT Segmentation</span>
-  <span class="crumb" id="crumb"></span>
-  <span class="right"><button class="quiet" id="navHome">All projects</button></span>
-</div></header>
+<nav id="side">
+  <div class="top">
+    <span class="brand" id="brand" title="all projects">CT Segmentation</span>
+    <button id="rail" title="Hide the sidebar">&#9776;</button>
+  </div>
+  <div class="sidehead"><span>Projects</span>
+    <button id="pnew" title="New project">+</button></div>
+  <div id="plist"></div>
+  <div id="sfoot">
+    <label for="gdev">Run on</label>
+    <select id="gdev"><option value="gpu">GPU</option><option value="cpu">CPU</option></select>
+    <label for="gpar">At once</label>
+    <select id="gpar">
+      <option value="1">1 case</option><option value="2">2 cases</option>
+      <option value="4" selected>4 cases</option><option value="8">8 cases</option>
+    </select>
+  </div>
+</nav>
 <main>
+  <span class="crumb" id="crumb" hidden></span>
   <div id="view"></div>
 </main>
 <div id="live"><div class="in">
@@ -206,6 +279,7 @@ const $ = (h) => { const t = document.createElement("template");
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const SEP_TAIL = /[\\/][^\\/]*$/;   /* the last path segment, either slash */
+const g = (id) => document.getElementById(id);
 const view = document.getElementById("view");
 const crumb = document.getElementById("crumb");
 let POLL = null;
@@ -268,11 +342,64 @@ function route() {
   /* The viewer needs a wider column than anything else. Toggled here rather than in
      the page function, so no other page has to remember to put it back. */
   document.body.classList.toggle("wide", v === "viewseg");
+  /* the viewer has a structure list of its own; two sidebars side by side is one too
+     many, so this one steps back to the rail while you are in there */
+  if (v === "viewseg" && !SET.rail) document.body.classList.add("railed");
+  else document.body.classList.toggle("railed", SET.rail);
+  paintSidebar(v === "project" || v === "fossa" || v === "viewseg" || v === "add"
+               ? parts[0] : "");
   /* leaving the job screen, so the running bar becomes the way back to it */
   LIVE_ON = false;
   (ROUTES[v] || ROUTES.home)(parts);
 }
 window.addEventListener("hashchange", route);
+
+/* ---------------------------------------------------------- the sidebar
+   Projects live here rather than only on a home screen, so moving between two of them
+   is one click from anywhere. What the sidebar holds at the bottom - where to run, how
+   many at once - applies to every project, which is why it is not on any one screen. */
+const SET = {device: "gpu", workers: 4, rail: false};
+try {
+  Object.assign(SET, JSON.parse(localStorage.getItem("ctgui") || "{}"));
+} catch {}                       /* a private window throws on read; defaults are fine */
+function saveSet() {
+  try { localStorage.setItem("ctgui", JSON.stringify(SET)); } catch {}
+}
+
+const side = {list: g("plist"), dev: g("gdev"), par: g("gpar")};
+side.dev.value = SET.device;
+side.par.value = String(SET.workers);
+side.dev.onchange = () => { SET.device = side.dev.value; saveSet(); };
+side.par.onchange = () => { SET.workers = +side.par.value; saveSet(); };
+
+function setRail(on) {
+  SET.rail = !!on;
+  document.body.classList.toggle("railed", SET.rail);
+  g("rail").title = SET.rail ? "Show the sidebar" : "Hide the sidebar";
+  saveSet();
+}
+setRail(SET.rail);
+g("rail").onclick = () => setRail(!SET.rail);
+g("pnew").onclick = () => nav("new");
+
+let PROJECTS = null;
+async function paintSidebar(active) {
+  if (!PROJECTS) {
+    try { PROJECTS = (await api("/api/projects")).projects; } catch { return; }
+  }
+  side.list.innerHTML = "";
+  for (const p of PROJECTS) {
+    const row = $(`<div class="pitem${p.name === active ? " on" : ""}">
+      <span class="pinit">${esc(p.name.slice(0, 2).toUpperCase())}</span>
+      <span class="name">${esc(p.name)}</span>
+      <span class="n">${p.cases}</span></div>`);
+    row.title = p.name;
+    row.onclick = () => nav("project", p.name);
+    side.list.append(row);
+  }
+}
+/* the list is only wrong after a project is made, added to or deleted */
+function sidebarStale() { PROJECTS = null; }
 
 /* ---------------------------------------------------------------- home */
 async function home() {
@@ -414,7 +541,7 @@ async function newProject(preset, into) {
           .map(i => JSON.parse(i.dataset.case));
         const cerr = document.getElementById("cerr"); cerr.innerHTML = "";
         const body = {cases, mode, delete_zips: !!(del && del.checked),
-                      workers: (nw && +nw.value) || 4};
+                      workers: SET.workers};
         try {
           const r = into
             ? await api("/api/project/add", Object.assign({project: into}, body))
@@ -434,6 +561,7 @@ async function newProject(preset, into) {
               cerr.append($(`<div class="note warn">${esc(st.error || "failed")}</div>`));
           });
           undo();
+          sidebarStale();
           nav("project", r.name);
         } catch (e) { undo(); cerr.append(err(e)); }
       };
@@ -508,42 +636,78 @@ async function project(name) {
 
   view.innerHTML = "";
   const offline = st.case_status.filter(c => !c.online);
+  /* Three tabs rather than three stacked sections. The case list alone is fifteen
+     thousand pixels tall on this project, and the button that starts a run used to sit
+     under all of it. */
   view.append($(`<div>
-    <h1>${esc(name)}</h1>
-    <div id="desc" style="margin:0 0 4px"></div>
-    <p class="sub">${st.case_status.length} case(s) &middot;
-      ${st.mode === "move" ? "" : "linked to "}<span
-        class="mono">${esc(st.source || "")}</span></p>
-    ${offline.length ? `<div class="note warn">${offline.length} case(s) point at a
-      folder that is not there right now - is the drive connected?</div>` : ""}
-    <div class="row" style="margin-bottom:10px">
-      <button class="ghost" id="addcases">Add cases</button>
-      <button class="quiet" id="scanfolder"
-        title="open the folder holding this project's DICOMs">view files in folder</button>
+    <div class="phead">
+      <div>
+        <h1>${esc(name)}</h1>
+        <div id="desc"></div>
       </div>
+      <div class="row" style="margin-left:auto">
+        <button class="ghost" id="addcases">Add cases</button>
+        <button class="quiet" id="scanfolder">Open folder</button>
+      </div>
+    </div>
+    <p class="sub">${st.case_status.length} case${st.case_status.length === 1 ? "" : "s"}
+      &middot; ${st.mode === "move" ? "" : "linked to "}<span
+        class="mono">${esc(st.source || "")}</span></p>
+    ${offline.length ? `<div class="note warn">${offline.length} case${
+      offline.length === 1 ? "'s folder is" : "s' folders are"} missing. Is the drive
+      connected?</div>` : ""}
     <div id="sferr"></div>
-    <div class="row" style="margin-bottom:8px">
-      <input type="search" id="qcase" placeholder="Find a case by name…"
-             style="max-width:280px"></div>
-    <div id="cases"></div>
-    <div class="meta" id="cksum" style="margin-bottom:18px"></div>
-    <h2>Segment</h2>
-    <div class="row" style="margin-bottom:10px">
-      <input type="search" id="q" placeholder="Search 40 structures…" style="max-width:320px">
-      <label class="ui meta"><input type="checkbox" id="force"> re-run even if done</label>
+
+    <div class="tabs" id="ptabs">
+      <button class="tab on" data-t="cases">Cases</button>
+      <button class="tab" data-t="run">Run</button>
+      <button class="tab" data-t="results">Results</button>
     </div>
-    <div class="tasklist" id="tl"></div>
-    <div id="lic"></div>
-    <h2>Analyses</h2>
-    <div class="tasklist" id="al"></div>
-    <div class="row" style="margin-top:18px">
-      <button id="run">Start segmenting</button>
-      <button class="ghost" id="scan">Check series first</button>
-    </div>
-    <div id="runerr"></div>
-    <h2>Results</h2>
-    <div id="results"></div>
+
+    <section class="pane" data-t="cases">
+      <div class="row" style="margin-bottom:8px">
+        <input type="search" id="qcase" placeholder="Find a case by name…"
+               style="max-width:280px">
+        <span class="right meta" id="cksum"></span></div>
+      <div id="cases"></div>
+    </section>
+
+    <section class="pane hide" data-t="run">
+      <div class="runcols">
+        <div>
+          <div class="lbl">Structures</div>
+          <div class="row" style="margin-bottom:8px">
+            <input type="search" id="q" placeholder="Search 40 structures…">
+          </div>
+          <div class="tasklist" id="tl"></div>
+          <div id="lic"></div>
+        </div>
+        <div>
+          <div class="lbl">Analyses</div>
+          <div class="tasklist" id="al"></div>
+          <label class="ui meta" style="display:block;margin-top:12px">
+            <input type="checkbox" id="force"> Re-run cases that are already done</label>
+        </div>
+      </div>
+      <div class="row runbar">
+        <button id="run">Start segmenting</button>
+        <button class="ghost" id="scan">Check series first</button>
+        <span class="right meta" id="runsum"></span>
+      </div>
+      <div id="runerr"></div>
+    </section>
+
+    <section class="pane hide" data-t="results">
+      <div id="results"></div>
+    </section>
     </div>`));
+
+  /* One pane at a time, and the tab is the only thing that says which. */
+  for (const b of view.querySelectorAll("#ptabs .tab")) b.onclick = () => {
+    view.querySelectorAll("#ptabs .tab").forEach(x => x.classList.toggle("on", x === b));
+    view.querySelectorAll(".pane").forEach(x =>
+      x.classList.toggle("hide", x.dataset.t !== b.dataset.t));
+  };
 
   /* Click the description to edit it; Enter or blur saves, Escape puts it back. No
      separate edit button, and no save button to forget to press. */
@@ -750,6 +914,7 @@ async function project(name) {
     if (!tasks.length && !anal.length) {
       undo(); box.append(err({message:"Tick at least one structure or analysis."})); return; }
     const plan = {project:name, cases:cs, tasks, analyses:anal,
+      device: SET.device,
       force: document.getElementById("force").checked,
       license: (document.getElementById("licno")||{}).value || ""};
     try {
@@ -1914,7 +2079,6 @@ async function viewseg(name, cse, focus) {
         </div>
       </section>
     </div></div>`));
-  const g = (id) => document.getElementById(id);
   g("back").onclick = () => nav("project", name);
 
   let st;
@@ -2386,8 +2550,7 @@ async function viewseg(name, cse, focus) {
   syncTree(); paintChrome(); request(); stage.focus();
 }
 
-document.getElementById("navHome").onclick = () => nav("home");
-document.getElementById("brand").onclick = () => nav("home");
+g("brand").onclick = () => nav("home");
 route();
 </script>
 </body>
