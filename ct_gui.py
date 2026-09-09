@@ -849,12 +849,12 @@ def table_columns(project):
 
     Read through produce_table's own reader, so the list offered here and the columns
     that come out cannot disagree about what a stats file contains."""
-    from produce_table import read_stats     # light: its pandas import is lazy
+    from produce_table import read_stats, stats_files   # light: pandas is lazy there
     tasks = {}
     root = seg_dir_for(project)
     cases = [d for d in root.iterdir() if d.is_dir()] if root.is_dir() else []
     for d in cases:
-        for f in d.glob("*.stats.json"):
+        for f in stats_files(d):
             try:
                 stats = json.loads(f.read_text())
             except Exception:
@@ -1557,9 +1557,12 @@ def measurement_lines(group, case, shape, zooms, aff):
     only to draw a line.
     """
     import numpy as np
+    from produce_table import stats_files
     d = seg_dir_for(group) / case
     stats = None
-    for f in sorted(d.glob("*fossae_simple.stats.json")):
+    for f in stats_files(d):
+        if not f.name.endswith("fossae_simple.stats.json"):
+            continue
         try:
             stats = json.loads(f.read_text())
         except Exception:

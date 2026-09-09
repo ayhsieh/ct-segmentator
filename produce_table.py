@@ -41,6 +41,22 @@ BRAIN_ICV_KEYS = ["brain_ml", "icv_ml", "removed_from_brain_ml",
                   "brain_clipped_to_icv_ml"]
 
 
+def stats_files(case_dir):
+    """The stats files for a case, with superseded ones left out.
+
+    Results written before output filenames carried the case name are still on disk
+    beside the current ones - fossae_simple.stats.json next to CASE_fossae_simple.
+    They describe the same thing and the plain one is older, so reading both means the
+    order of a glob decides which numbers a table gets. The one that names the case
+    wins; where there is no such file, the plain one is all there is and is used.
+    """
+    files = sorted(case_dir.glob("*.stats.json"))
+    named = {f.name for f in files}
+    stem = "_".join(str(case_dir.name).split()) + "_"
+    return [f for f in files
+            if not (stem + f.name) in named]
+
+
 def read_stats(task, d):
     """(task, column) and value for every number in one stats file.
 
@@ -118,7 +134,7 @@ def main():
 
     for case in cases:
         case_dir = total_dir / case
-        for f in case_dir.glob("*.stats.json"):
+        for f in stats_files(case_dir):
             task = f.name[: -len(".stats.json")]
             try:
                 d = json.loads(f.read_text())

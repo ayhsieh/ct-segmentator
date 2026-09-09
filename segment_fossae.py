@@ -862,7 +862,11 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
     out = {"length_ofd": round(length, 1),
            "width_bpd": round(width, 1),
            "height": round(height, 1),
-           "cephalic_index": round(100.0 * width / length, 1) if length else None,
+           # Cranial and not cephalic: the two are the same arithmetic, and the name
+           # says what was measured. Cephalic is the living head, calipers over skin,
+           # soft tissue included. This is bone - the skull mask's outer table - which
+           # is the cranial index.
+           "cranial_index": round(100.0 * width / length, 1) if length else None,
            "width_height_up_fraction": round(up_frac, 3) if up_frac is not None else None}
     if up_frac is not None and up_frac < 0.15:
         out["warning"] = ("the widest point sits low on the skull - check that it is "
@@ -870,7 +874,7 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
 
     # ---- point of maximum width: how far back the widest point sits, as a fraction of
     # the length. In sagittal synostosis it sits too far forward, and it moves back to
-    # the normal place after surgery - and it barely tracks the cephalic index, so it
+    # the normal place after surgery - and it barely tracks the cranial index, so it
     # says something that number does not. (PMC4090594)
     span = float(fv[gi] - fv[oi])
     if span > 0:
@@ -1267,7 +1271,7 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
         stats["outer_mm"] = lin
         log("outer: length %.0f  width %.0f  height %.0f  CI %.0f"
             % (lin["length_ofd"], lin["width_bpd"], lin["height"],
-               lin["cephalic_index"] or 0), 2)
+               lin["cranial_index"] or 0), 2)
     else:
         log("no total/skull mask - outer measurements skipped", 2)
     if frac["anterior_fossa"] > 30 or frac["anterior_fossa"] < 5 \

@@ -1743,13 +1743,20 @@ async function fossa(name, cse) {
         + cell("width", mm("width_bpd"))
         + cell("height", mm("height"))
         + cell("circumference", mm("circumference_ofc"))
-        + cell("cephalic index", o.cephalic_index == null ? "—"
-                                 : String(o.cephalic_index))
+        + cell("cranial index", o.cranial_index == null ? "—"
+                                 : String(o.cranial_index))
+        /* How far back the widest point sits. It sits too far forward in sagittal
+           synostosis and moves back after surgery, and it barely tracks the cephalic
+           index - so it earns its own place beside it rather than living in the CSV. */
+        + cell("widest point", o.point_of_max_width == null ? "—"
+               : Math.round(100 * o.point_of_max_width) + "% back")
         + `</div><div class="row" style="margin-top:6px">`
         + ["anterior", "middle", "posterior"].map(z =>
             cell(z, `${mm(z + "_width")} wide · ${mm(z + "_height")} tall`)
           ).join("")
-        + `<span class="right meta">outer surface of the skull</span></div>`;
+        + `<span class="right meta">outer surface of the skull</span></div>`
+        + (o.warning ? `<div class="note amber" style="margin-top:10px">${
+             esc(o.warning)}</div>` : "");
     }
     box.append($(`<div class="card">${html}</div>`));
   }
