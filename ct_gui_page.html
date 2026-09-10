@@ -2369,8 +2369,8 @@ async function viewseg(name, cse, focus) {
      slices means eight millimetres on one view and one and a half on another, and the
      lines vanish on whichever plane happens to be finely sampled. */
   const NEAR_MM = 9;
-  const sliceMM = () => ({axial: st.zooms[2], coronal: st.zooms[1],
-                          sagittal: st.zooms[0]}[S.plane] || 1);
+  const sliceMM = (pl) => ({axial: st.zooms[2], coronal: st.zooms[1],
+                            sagittal: st.zooms[0]}[pl || S.plane] || 1);
 
   function drawMeasures() {
     const P = st.planes[S.plane], at = S.idx[S.plane];
@@ -2404,6 +2404,32 @@ async function viewseg(name, cse, focus) {
     svg.innerHTML = out;
   }
 
+  /* A measurement lies in whichever plane its two ends share - a width has both ends
+     on one axial slice, a length on one sagittal - so the plane to show is the one
+     where they are closest, and the slice is where they are. */
+  function goTo(m) {
+    let best = null;
+    for (const pl of PL) {
+      /* In millimetres, not slices: slices are 2.5 mm apart one way here and 0.49 mm
+         the other, so counting them sends a midline length to the axial view.
+         A line lies in two of the three planes - a width is on one axial slice and
+         also on one coronal - so near-ties go to whichever comes first in PL, which
+         is the view each measurement is conventionally read on. */
+      const gap = Math.abs(m.a[pl].i - m.b[pl].i) * sliceMM(pl);
+      if (!best || gap < best.gap - 3)
+        best = {pl, gap, i: Math.round((m.a[pl].i + m.b[pl].i) / 2)};
+    }
+    if (!best) return;
+    mOn.add(m.key);
+    for (const r of g("vmlist").querySelectorAll(".vrow")) r.classList.remove("here");
+    S.plane = best.pl;
+    S.mode = "2d";
+    S.idx[best.pl] = Math.max(0, Math.min(st.planes[best.pl].n - 1, best.i));
+    paintChrome();
+    request();
+    measureList();
+  }
+
   function measureList() {
     const box = g("vmlist");
     if (!MEAS.length) { box.innerHTML = ""; return; }
@@ -2411,15 +2437,20 @@ async function viewseg(name, cse, focus) {
     box.append($(`<div class="meta" style="margin:14px 0 4px">Measurements</div>`));
     for (const m of MEAS) {
       const row = $(`<div class="vrow${mOn.has(m.key) ? " on" : ""}">
-        <span class="veye">&#9679;</span>
+        <span class="veye" title="Show or hide the line">&#9679;</span>
         <span class="vsw" style="background:${m.colour}"></span>
         <span class="vname">${esc(m.label)}</span>
         <span class="right meta">${m.mm} mm</span></div>`);
-      row.onclick = () => {
+      /* The dot shows and hides the line; the row takes you to it. Finding the slice a
+         width was taken on by dragging the scrubber is the tedious part, and the
+         measurement already knows which slice that is. */
+      row.querySelector(".veye").onclick = (e) => {
+        e.stopPropagation();
         mOn.has(m.key) ? mOn.delete(m.key) : mOn.add(m.key);
         row.classList.toggle("on", mOn.has(m.key));
         drawMeasures();
       };
+      row.onclick = () => goTo(m);
       box.append(row);
     }
   }
