@@ -907,18 +907,13 @@ async function project(name) {
       .map(i => i.value).filter(v => t.tasks.find(x => x.name === v && x.licensed));
     const box = document.getElementById("lic");
     box.innerHTML = "";
-    if (!need.length) return;
-    /* TotalSegmentator stores a license once and reuses it, so when one is already
-       registered on this machine there is nothing to ask for. */
-    if (t.license_stored) {
-      box.append($(`<div class="note">
-        <b>${esc(need.join(", "))}</b> need a license &mdash; one is already registered
-        on this computer, so they will just run.</div>`));
-      return;
-    }
+    /* Nothing to say when nothing is needed. TotalSegmentator keeps a licence once it
+       has one, so with it stored these tasks simply run - and a box explaining that
+       they will run is a box about the absence of a problem. */
+    if (!need.length || t.license_stored) return;
     box.append($(`<div class="note amber">
-      <b>${esc(need.join(", "))}</b> need a free non-commercial license number.
-      <input type="text" id="licno" placeholder="license number"
+      <b>${esc(need.join(", "))}</b> need a free licence number.
+      <input type="text" id="licno" placeholder="Licence number"
              style="max-width:260px;margin-top:8px"></div>`));
   }
 
@@ -1399,8 +1394,7 @@ async function series(name, job, plan, cases) {
   if (!plan) return;
 
   if (!blocking.length && !unseen.length) {
-    snote.append($(`<div class="note">Every case already had a series chosen. Starting
-      the segmentation…</div>`));
+    snote.append($(`<div class="note">Every case had a series already. Starting…</div>`));
     return launch(document.getElementById("go"));
   }
   document.querySelector("h1").textContent = "Which series?";
@@ -1488,8 +1482,8 @@ your series choice is kept; untick to bring it back."><input
           card.dataset.wait = "";        /* answered - but it stays on screen */
           unresolved.delete(cse); retest();
           if (res.cleared_nifti)
-            card.append($(`<div class="note amber">Removed the old converted image so
-              this new choice takes effect.</div>`));
+            card.append($(`<div class="note amber">The old image was removed, so this
+              case will be converted again.</div>`));
         } catch (e) { card.append(err(e)); } finally { undo(); }
       };
       tr.querySelector(".look").onclick = () => preview(card, cse, s);
@@ -1605,8 +1599,8 @@ async function fossa(name, cse) {
       <button class="quiet" id="clear">Clear</button></div>
     <canvas id="cv" width="560" height="560"></canvas>
     <div class="meta" style="margin:8px 0 16px">Skull floor from above, light is high.
-      Click left to right to draw a boundary. Magenta is anterior, cyan is posterior;
-      dashed is what the pipeline chose.</div>
+      Click left to right to draw. Magenta anterior, cyan posterior; dashed is the
+      pipeline's.</div>
     </div>
     <div>
     <div id="vols"></div>
@@ -1668,9 +1662,8 @@ async function fossa(name, cse) {
   }
   result.onerror = () => {
     result.style.display = "none";
-    document.getElementById("rout").append($(`<div class="note">No result picture for
-      this case yet — apply a correction, or re-run the fossa analysis, to draw
-      one.</div>`));
+    document.getElementById("rout").append($(`<div class="note">No picture yet.
+      Apply a correction to draw one.</div>`));
   };
   showResult();
 
