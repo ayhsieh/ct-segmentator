@@ -758,13 +758,13 @@ def hull_perimeter(pts):
     outline's, which would be longer by however rough the surface is."""
     from scipy.spatial import ConvexHull
     if len(pts) < 3:
-        return None
+        return None, None
     try:
         h = ConvexHull(pts)
     except Exception:
-        return None
+        return None, None
     v = pts[h.vertices]
-    return float(np.linalg.norm(v - np.roll(v, 1, axis=0), axis=1).sum())
+    return float(np.linalg.norm(v - np.roll(v, 1, axis=0), axis=1).sum()), v
 
 
 MIDLINE_MM = 5.0        # half-thickness of the slab that counts as the midsagittal plane
@@ -881,10 +881,13 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
         peak_f = float((fv[li] + fv[ri]) / 2)
         out["point_of_max_width"] = round((fv[gi] - peak_f) / span, 3)
 
-    # ---- circumference round that same widest level
-    c = hull_perimeter(np.c_[lane[wide], fv[wide]])
+    # ---- circumference round that same widest level, and the ring itself, so what a
+    # tape would have gone round can be drawn rather than only stated
+    c, ring = hull_perimeter(np.c_[lane[wide], fv[wide]])
     if c:
         out["circumference_ofc"] = round(c, 1)
+        pts["ofc_ring"] = [[round(float(v), 2) for v in
+                            (mid + a * lr + b * fwd + peak_h * up)] for a, b in ring]
 
     # ---- Anterior, middle and posterior by the same rule that divides the volumes:
     # the two boundaries are curves that bend from lane to lane, not flat cuts, so each
@@ -905,12 +908,20 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
         zl = sel[int(np.argmin(lane[sel]))]
         zr = sel[int(np.argmax(lane[sel]))]
         zt = sel[int(np.argmax(h[sel]))]
+        zf = sel[int(np.argmax(fv[sel]))]
+        zb = sel[int(np.argmin(fv[sel]))]
         keep(f"{z}_width_a", zl)
         keep(f"{z}_width_b", zr)
         keep(f"{z}_vertex", zt)
+        keep(f"{z}_front", zf)
+        keep(f"{z}_back", zb)
+        # the foot of this region's height, straight down from its own highest point,
+        # so the height is a line and not only a number
+        pts[f"{z}_height_foot"] = [round(float(v), 2)
+                                   for v in (W[zt] - (h[zt] - base_h) * up)]
         out[f"{z}_width"] = round(float(lane[zr] - lane[zl]), 1)
         out[f"{z}_height"] = round(float(h[zt] - base_h), 1)
-        out[f"{z}_length"] = round(float(fv[sel].max() - fv[sel].min()), 1)
+        out[f"{z}_length"] = round(float(fv[zf] - fv[zb]), 1)
 
     out["points"] = pts
     # The axes every one of these was taken along. Without them a viewer can only draw

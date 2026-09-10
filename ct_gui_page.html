@@ -243,6 +243,8 @@ body.wide main{max-width:1180px}
 .vstage svg.vmeas{position:absolute;pointer-events:none}
 .vstage svg.vmeas line{stroke-linecap:round}
 .vstage svg.vmeas circle{r:2.2}
+.vstage svg.vmeas polygon{stroke-width:1.1;stroke-dasharray:3 2}
+.vrow.noeye .veye{visibility:hidden}
 /* the viewBox is millimetres, so strokes and type are given in millimetres too and
    keep their size against the head however the picture is scaled */
 .vstage svg.vmeas line{stroke-width:1.3}
@@ -2364,6 +2366,7 @@ async function viewseg(name, cse, focus) {
      asked for. Six lines at once is a thicket, and two of them coincide - the middle
      region's width is usually the maximum breadth itself. */
   const mOn = new Set(["width_bpd", "length_ofd", "height"]);
+  let FOCUS = null;            /* the measurement you clicked, always drawn */
   /* How far off the slice a point can be and still be drawn - in millimetres, not in
      slices. Slices are 2.5 mm apart one way here and 0.49 mm the other, so a count of
      slices means eight millimetres on one view and one and a half on another, and the
@@ -2384,13 +2387,29 @@ async function viewseg(name, cse, focus) {
     svg.style.top = (r.top - sr.top) + "px";
     let out = "";
     for (const m of MEAS) {
-      if (!mOn.has(m.key)) continue;
+      if (!mOn.has(m.key) || m.value !== undefined) continue;
+      if (m.ring) {                       /* a circumference is a loop, not a line */
+        const on = m.ring.filter(p =>
+          Math.abs(p[S.plane].i - at) * sliceMM() <= NEAR_MM);
+        if (on.length < 3 && m.key !== FOCUS) continue;
+        const pts = m.ring.map(p => `${p[S.plane].x},${p[S.plane].y}`).join(" ");
+        out += `<g stroke="${m.colour}" fill="none" opacity="0.9">`
+          + `<polygon points="${pts}"></polygon></g>`
+          + `<text x="${m.ring[0][S.plane].x}" y="${m.ring[0][S.plane].y - 4}"`
+          + ` fill="${m.colour}" stroke-width="1.6" text-anchor="middle"`
+          + ` font-size="6">${esc(m.label)} ${m.mm} mm</text>`;
+        continue;
+      }
       const a = m.a[S.plane], b = m.b[S.plane];
       /* both ends near, not either: a measurement whose far end is slices away is
          being seen end-on, and its line across this picture means nothing. This is
          what keeps the length off the axial views and on the sagittal ones. */
       const d = Math.max(Math.abs(a.i - at), Math.abs(b.i - at)) * sliceMM();
-      if (d > NEAR_MM) continue;
+      /* Normally both ends must be near the slice, or you are seeing the measurement
+         end-on. The one you clicked is the exception: you asked for it, and some - a
+         region's front-to-back length - have ends too far apart for any single slice
+         to hold both. */
+      if (d > NEAR_MM && m.key !== FOCUS) continue;
       /* fainter the further the slice is from the one the point sits on, so it is
          obvious when you are looking at the place it was actually measured */
       const op = 1 - 0.7 * (d / NEAR_MM);
@@ -2408,6 +2427,14 @@ async function viewseg(name, cse, focus) {
      on one axial slice, a length on one sagittal - so the plane to show is the one
      where they are closest, and the slice is where they are. */
   function goTo(m) {
+    FOCUS = m.key;
+    if (m.ring) {                         /* a loop sits on one slice: go to it */
+      mOn.add(m.key);
+      S.plane = "axial"; S.mode = "2d";
+      S.idx.axial = m.ring[0].axial.i;
+      paintChrome(); request(); measureList();
+      return;
+    }
     let best = null;
     for (const pl of PL) {
       /* In millimetres, not slices: slices are 2.5 mm apart one way here and 0.49 mm
@@ -2436,21 +2463,27 @@ async function viewseg(name, cse, focus) {
     box.innerHTML = "";
     box.append($(`<div class="meta" style="margin:14px 0 4px">Measurements</div>`));
     for (const m of MEAS) {
-      const row = $(`<div class="vrow${mOn.has(m.key) ? " on" : ""}">
+      /* A ratio has no line to show, so it gets no dot to show it with - but it is
+         still one of this head's numbers, and it is defined where the width was taken,
+         so clicking it goes to that slice like everything else. */
+      const ratio = m.value !== undefined;
+      const row = $(`<div class="vrow${!ratio && mOn.has(m.key) ? " on" : ""}${
+          ratio ? " noeye" : ""}">
         <span class="veye" title="Show or hide the line">&#9679;</span>
         <span class="vsw" style="background:${m.colour}"></span>
         <span class="vname">${esc(m.label)}</span>
-        <span class="right meta">${m.mm} mm</span></div>`);
+        <span class="right meta">${ratio ? m.value + m.unit : m.mm + " mm"}</span></div>`);
       /* The dot shows and hides the line; the row takes you to it. Finding the slice a
          width was taken on by dragging the scrubber is the tedious part, and the
          measurement already knows which slice that is. */
       row.querySelector(".veye").onclick = (e) => {
         e.stopPropagation();
+        if (ratio) return;
         mOn.has(m.key) ? mOn.delete(m.key) : mOn.add(m.key);
         row.classList.toggle("on", mOn.has(m.key));
         drawMeasures();
       };
-      row.onclick = () => goTo(m);
+      row.onclick = () => { if (m.ring || (m.a && m.b)) goTo(m); };
       box.append(row);
     }
   }

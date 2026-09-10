@@ -1540,12 +1540,30 @@ MEASURES = [
     ("width_bpd", "euryon_a", "euryon_b", "width", "#ff4d3d"),
     ("length_ofd", "glabella", "opisthocranion", "length", "#2bb3ff"),
     ("height", "height_foot", "vertex", "height", "#3ddc84"),
+    ("circumference_ofc", "ofc_ring", None, "circumference", "#f2c14e"),
     ("anterior_width", "anterior_width_a", "anterior_width_b", "anterior width",
      "#c88bff"),
+    ("anterior_height", "anterior_height_foot", "anterior_vertex", "anterior height",
+     "#c88bff"),
+    ("anterior_length", "anterior_back", "anterior_front", "anterior length",
+     "#c88bff"),
     ("middle_width", "middle_width_a", "middle_width_b", "middle width", "#ffb648"),
+    ("middle_height", "middle_height_foot", "middle_vertex", "middle height",
+     "#ffb648"),
+    ("middle_length", "middle_back", "middle_front", "middle length", "#ffb648"),
     ("posterior_width", "posterior_width_a", "posterior_width_b", "posterior width",
      "#7de0d0"),
+    ("posterior_height", "posterior_height_foot", "posterior_vertex",
+     "posterior height", "#7de0d0"),
+    ("posterior_length", "posterior_back", "posterior_front", "posterior length",
+     "#7de0d0"),
 ]
+
+# Numbers with no two points to draw between. They still belong in the list, because
+# the list is what this case measures - and each is defined where the width was taken,
+# so clicking one goes to that slice.
+RATIOS = [("cranial_index", "cranial index", ""),
+          ("point_of_max_width", "widest point", "% back")]
 
 
 def measurement_lines(group, case, shape, zooms, aff):
@@ -1575,6 +1593,15 @@ def measurement_lines(group, case, shape, zooms, aff):
     nx, ny, nz = shape
     zx, zy, zz = zooms
 
+    def at_xy(w):
+        x, y, z = (inv[:3, :3] @ np.asarray(w, float) + inv[:3, 3])
+        return {"axial": {"x": (nx - 1 - x) * zx, "y": (ny - 1 - y) * zy,
+                          "i": int(round(z))},
+                "coronal": {"x": (nx - 1 - x) * zx, "y": (nz - 1 - z) * zz,
+                            "i": int(round(y))},
+                "sagittal": {"x": (ny - 1 - y) * zy, "y": (nz - 1 - z) * zz,
+                             "i": int(round(x))}}
+
     def at(name):
         """Where the point is drawn, in millimetres across the picture.
 
@@ -1584,25 +1611,36 @@ def measurement_lines(group, case, shape, zooms, aff):
         slices, which is what the viewer counts in.
         """
         w = pts.get(name)
-        if not w:
-            return None
-        x, y, z = (inv[:3, :3] @ np.asarray(w, float) + inv[:3, 3])
         # the same flips slice2d applies, so a point lands where its voxel is drawn
-        return {"axial": {"x": (nx - 1 - x) * zx, "y": (ny - 1 - y) * zy,
-                          "i": int(round(z))},
-                "coronal": {"x": (nx - 1 - x) * zx, "y": (nz - 1 - z) * zz,
-                            "i": int(round(y))},
-                "sagittal": {"x": (ny - 1 - y) * zy, "y": (nz - 1 - z) * zz,
-                             "i": int(round(x))}}
+        return at_xy(w) if w else None
 
     out = []
     mm = (stats or {}).get("outer_mm") or {}
     for key, a, b, label, colour in MEASURES:
+        if mm.get(key) is None:
+            continue
+        if b is None:                       # a closed ring, not a pair of ends
+            ring = pts.get(a)
+            if not ring:
+                continue
+            drawn = [at_xy(w) for w in ring]
+            out.append({"key": key, "label": label, "colour": colour,
+                        "mm": mm[key], "ring": drawn})
+            continue
         pa, pb = at(a), at(b)
-        if not pa or not pb or mm.get(key) is None:
+        if not pa or not pb:
             continue
         out.append({"key": key, "label": label, "colour": colour,
                     "mm": mm[key], "a": pa, "b": pb})
+    # the ratios go last, where the width was taken
+    where = next((m for m in out if m["key"] == "width_bpd"), None)
+    for key, label, unit in RATIOS:
+        if mm.get(key) is None:
+            continue
+        v = mm[key]
+        out.append({"key": key, "label": label, "colour": "#9d9689",
+                    "value": round(100 * v) if unit else v, "unit": unit,
+                    "a": where and where["a"], "b": where and where["b"]})
     return out
 
 
