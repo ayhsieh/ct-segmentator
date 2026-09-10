@@ -29,6 +29,7 @@ from scipy.ndimage import map_coordinates
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.backends.backend_pdf import PdfPages
 
 APP = Path(__file__).resolve().parent
@@ -37,12 +38,27 @@ os.environ.setdefault("CT_DATA_ROOT", str(APP / "projects"))
 from ct_paths import seg_dir_for                      # noqa: E402
 from produce_table import stats_files                 # noqa: E402
 from segment_structures import find_source_nifti      # noqa: E402
+from segment_fossae import find_out, LABEL_VALUES     # noqa: E402
 from ct_gui import MEASURES, RATIOS                   # noqa: E402
 
 HALF = 105.0        # mm each way from the middle of the line
 STEP = 0.6          # mm per pixel in the re-cut picture
 WL, WW = 300.0, 1500.0                                # bone window
 COLS, ROWS = 4, 4
+
+# The compartment a regional measurement belongs to gets the colour that
+# measurement is drawn in, so "does the line sit in its own fossa" is one look
+# and not a cross-reference against a key.
+ZONE_COLOUR = {LABEL_VALUES["anterior_fossa"]: "#c88bff",
+               LABEL_VALUES["middle_fossa"]: "#ffb648",
+               LABEL_VALUES["posterior_fossa"]: "#7de0d0"}
+ZONE_NAME = {LABEL_VALUES["anterior_fossa"]: "anterior",
+             LABEL_VALUES["middle_fossa"]: "middle",
+             LABEL_VALUES["posterior_fossa"]: "posterior"}
+# Light, because the bone under it is the thing being checked. The edge of each
+# compartment is drawn as a line instead, which is where the question actually
+# lives: a regional height is meant to stop on its own fossa floor.
+WASH = 0.15
 
 
 # What each kind of measurement runs along, what the other picture axis should be,
@@ -84,7 +100,7 @@ def cut_axes(frame, key, ends):
     return (rest, line, view) if along == "up" else (line, rest, view)
 
 
-def recut(vol, aff, centre, e1, e2):
+def recut(vol, aff, centre, e1, e2, order=1, cval=-1024.0):
     """One oblique slice through centre, spanned by e1 and e2, in millimetres."""
     t = np.arange(-HALF, HALF + STEP, STEP)
     # rows are e2 and columns e1, which is the order imshow draws in: row to y,
@@ -96,7 +112,23 @@ def recut(vol, aff, centre, e1, e2):
     inv = np.linalg.inv(aff)
     vox = world @ inv[:3, :3].T + inv[:3, 3]
     return map_coordinates(vol, [vox[..., 0], vox[..., 1], vox[..., 2]],
-                           order=1, mode="constant", cval=-1024.0)
+                           order=order, mode="constant", cval=cval)
+
+
+def load_zones(project, case, shape):
+    """The three fossae as the pipeline labelled them, on the CT's own grid.
+
+    Returned only when it is that grid. A label volume from an older run of a
+    different series would line up with nothing, and a wash of colour sitting a
+    centimetre off the anatomy it claims is worse than no wash at all.
+    """
+    p = find_out(seg_dir_for(project) / case, case, "fossae_simple", ".nii.gz")
+    if not p.exists():
+        return None
+    lab = nib.load(str(p))
+    if lab.shape != shape:
+        return None
+    return np.asarray(lab.dataobj).astype(np.uint8)
 
 
 def load_stats(project, case):
@@ -111,7 +143,34 @@ def load_stats(project, case):
     return None
 
 
-def panel(ax, vol, aff, mm, pts, frame, key, a, b, label, colour, look):
+def paint_zones(ax, lab, aff, centre, e1, e2):
+    """The three fossae washed over the bone, each in its measurement's colour.
+
+    Nearest neighbour, because a compartment label is a name and halfway between
+    anterior and middle is not a place. The outline is the same cut drawn again
+    at its edge: a height is supposed to stop on its own fossa floor, and a wash
+    alone leaves you guessing at a boundary the eye has to find under grey.
+    """
+    if lab is None:
+        return
+    pic = recut(lab, aff, centre, e1, e2, order=0, cval=0)
+    rgba = np.zeros(pic.shape + (4,), np.float32)
+    for value, hexcol in ZONE_COLOUR.items():
+        m = pic == value
+        if m.any():
+            rgba[m, :3] = mcolors.to_rgb(hexcol)
+            rgba[m, 3] = WASH
+    ax.imshow(rgba, origin="lower", extent=[-HALF, HALF, -HALF, HALF],
+              interpolation="nearest")
+    t = np.arange(-HALF, HALF + STEP, STEP)
+    for value, hexcol in ZONE_COLOUR.items():
+        m = (pic == value).astype(float)
+        if m.any():
+            ax.contour(t, t, m, levels=[0.5], colors=hexcol, linewidths=0.6,
+                       alpha=0.95)
+
+
+def panel(ax, vol, aff, mm, pts, frame, key, a, b, label, colour, look, lab):
     """One measurement on its own cut. Returns how far the number is from the line.
 
     That gap is the check worth printing. The drawn line is a real distance
@@ -148,6 +207,7 @@ def panel(ax, vol, aff, mm, pts, frame, key, a, b, label, colour, look):
     ax.imshow(img, cmap="gray", vmin=WL - WW / 2, vmax=WL + WW / 2,
               origin="lower", extent=[-HALF, HALF, -HALF, HALF],
               interpolation="bilinear")
+    paint_zones(ax, lab, aff, centre, e1, e2)
 
     d = ends - centre
     x, y = d @ e1, d @ e2
@@ -171,8 +231,15 @@ def panel(ax, vol, aff, mm, pts, frame, key, a, b, label, colour, look):
     return gap
 
 
-def numbers_block(ax, mm, gaps):
+def numbers_block(ax, mm, gaps, lab):
     ax.set_axis_off()
+    top = 0.97
+    if lab is not None:
+        for n, value in enumerate(sorted(ZONE_COLOUR)):
+            ax.text(0.02, top - 0.055 * n, "█  " + ZONE_NAME[value] + " fossa",
+                    transform=ax.transAxes, fontsize=7, va="top",
+                    color=ZONE_COLOUR[value], family="monospace")
+        top -= 0.055 * len(ZONE_COLOUR) + 0.03
     rows = []
     for key, label, unit in RATIOS:
         if mm.get(key) is not None:
@@ -187,7 +254,7 @@ def numbers_block(ax, mm, gaps):
         rows += ["  %s off by %.0f mm" % (k, v) for v, k in bad[:4]]
     if mm.get("warning"):
         rows += ["", "flagged: " + mm["warning"][:60]]
-    ax.text(0.02, 0.97, "\n".join(rows), transform=ax.transAxes, fontsize=7,
+    ax.text(0.02, top, "\n".join(rows), transform=ax.transAxes, fontsize=7,
             family="monospace", va="top",
             color="#b00000" if (bad or mm.get("warning")) else "#222222")
 
@@ -200,6 +267,7 @@ def page(pdf, project, case, stats):
         return False
     img = nib.load(str(ct))
     vol = np.asarray(img.dataobj, dtype=np.float32)
+    lab = load_zones(project, case, vol.shape)
 
     # the middle of the head, so every panel frames the same skull
     look = np.array([v for k, v in pts.items() if k != "ofc_ring"], float).mean(axis=0)
@@ -212,11 +280,11 @@ def page(pdf, project, case, stats):
         if o.get(key) is None or i >= len(flat) - 1:
             continue
         g = panel(flat[i], vol, img.affine, o[key], pts, frame, key, a, b,
-                  label, colour, look)
+                  label, colour, look, lab)
         if g is not None:
             gaps[label] = g
         i += 1
-    numbers_block(flat[i], o, gaps)
+    numbers_block(flat[i], o, gaps, lab)
     for ax in flat[i + 1:]:
         ax.set_axis_off()
     fig.tight_layout(rect=[0, 0, 1, 0.975])
