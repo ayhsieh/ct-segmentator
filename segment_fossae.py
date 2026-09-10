@@ -770,7 +770,42 @@ def hull_perimeter(pts):
 MIDLINE_MM = 5.0        # half-thickness of the slab that counts as the midsagittal plane
 
 
-def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h):
+def level_extremes(sel, along, l1, l2, step=3.0, least=8):
+    """The two points of `sel` furthest apart along `along` that are level in both
+    other axes.
+
+    A caliper measures across something, at a place. Taking the extreme along one axis
+    and letting the other two fall where they may gives the right distance and a pair of
+    points that can be a hundred millimetres apart in another - a width that draws as a
+    diagonal across the brain, a length that draws as a line going up. Levelling in one
+    other axis only moves the problem to the third: a region reaches furthest forward at
+    the midline and furthest back off to one side.
+
+    So the two other axes are cut into cells and the widest run inside a single cell
+    wins. The number is the separation along `along`, which is what the measurement is
+    defined as, and the two points differ in nothing else worth drawing.
+    """
+    if len(sel) < least:
+        return None
+    a, x, y = along[sel], l1[sel], l2[sel]
+    b1 = np.floor((x - x.min()) / step).astype(np.int64)
+    b2 = np.floor((y - y.min()) / step).astype(np.int64)
+    key = b1 * (int(b2.max()) + 1) + b2
+    o = np.argsort(key, kind="stable")
+    k, v = key[o], a[o]
+    starts = np.flatnonzero(np.r_[True, k[1:] != k[:-1]])
+    counts = np.diff(np.r_[starts, len(v)])
+    span = np.maximum.reduceat(v, starts) - np.minimum.reduceat(v, starts)
+    span[counts < least] = -1.0
+    if not (span > 0).any():
+        return None
+    c = int(np.argmax(span))
+    cell = o[starts[c]:starts[c] + counts[c]]
+    return (float(span[c]), int(sel[cell[int(np.argmin(a[cell]))]]),
+            int(sel[cell[int(np.argmax(a[cell]))]]))
+
+
+def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, base_h):
     """The skull measured from outside, to the craniometric definitions.
 
     Maximum cranial length is "the straight-line distance from glabella to
@@ -806,36 +841,17 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
         pts[name] = [round(float(v), 2) for v in W[i]]
         return i
 
-    # ---- breadth: the widest level, and the two points across it.
-    # Level by level rather than the widest pair anywhere, because the arms of a
-    # spreading caliper are held horizontally on the parietal bones: two points ten
-    # millimetres apart in height are not a width anyone could take or draw. The same
-    # level is the plane a tape goes round, so this one search answers both.
-    step = 2.0
-    lo, hi = h.min(), h.max()
-    best = None
-    for level in np.arange(lo, hi, step):
-        sel = np.flatnonzero(np.abs(h - (level + step / 2)) <= step)
-        if len(sel) < 50:
-            continue
-        w = float(lane[sel].max() - lane[sel].min())
-        if best is None or w > best[0]:
-            best = (w, sel, level + step / 2)
-    if best is None:
+    # ---- breadth: the widest level, and the two points across it
+    allv = np.arange(len(lane))
+    got = level_extremes(allv, lane, h, fv, least=20)
+    if got is None:
         return None
-    width, wide, peak_h = best
-    # The width is flat near its peak, so the single furthest voxel on each side lands
-    # anywhere along a near-tie - on this head eighteen millimetres apart front to back,
-    # which measures correctly and draws as a diagonal across the brain. The distance is
-    # the perpendicular one either way; the pair reported is the one that also sits
-    # level front to back, so the line is the one a caliper would make.
-    lo_side = wide[lane[wide] <= lane[wide].min() + 0.5]
-    hi_side = wide[lane[wide] >= lane[wide].max() - 0.5]
-    gap = np.abs(fv[lo_side][:, None] - fv[hi_side][None, :])
-    x, y = np.unravel_index(int(np.argmin(gap)), gap.shape)
-    li, ri = int(lo_side[x]), int(hi_side[y])
+    width, li, ri = got
     keep("euryon_a", li)
     keep("euryon_b", ri)
+    peak_h = float((h[li] + h[ri]) / 2)
+    lo, hi = h.min(), h.max()
+    wide = np.flatnonzero(np.abs(h - peak_h) <= 2.0)
     # where the peak sits up the vault: near the floor would mean an arch won
     up_frac = (peak_h - lo) / (hi - lo) if hi > lo else None
 
@@ -901,15 +917,33 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
     zone = np.full(len(lane), 2, np.uint8)              # middle
     zone[fv < p_at] = 3                                 # posterior
     zone[(fv >= p_at) & (fv > a_at)] = 1                # anterior
+    # Each region is measured from its own floor, not from the foramen magnum. The
+    # anterior fossa floor sits far above it, so a common baseline drew the height of
+    # the front of the head as a line from the vault down past the orbit to the skull
+    # base - a true distance through anatomy that is not the anterior fossa.
+    floors = {}
+    if comps is not None:
+        cidx = np.argwhere(comps > 0)
+        if len(cidx):
+            CW = cidx @ affine[:3, :3].T + affine[:3, 3]
+            ch = (CW - mid) @ up
+            clab = comps[tuple(cidx.T)]
+            for z, value in (("anterior", 1), ("middle", 2), ("posterior", 3)):
+                m = clab == value
+                if m.any():
+                    floors[z] = float(ch[m].min())
     for z, value in (("anterior", 1), ("middle", 2), ("posterior", 3)):
         sel = np.flatnonzero(zone == value)
         if len(sel) < 50:
             continue
-        zl = sel[int(np.argmin(lane[sel]))]
-        zr = sel[int(np.argmax(lane[sel]))]
+        floor = floors.get(z, base_h)
+        wgot = level_extremes(sel, lane, h, fv)     # widest across
+        lgot = level_extremes(sel, fv, h, lane)     # longest front to back
+        if not wgot or not lgot:
+            continue
+        _, zl, zr = wgot
+        _, zb, zf = lgot
         zt = sel[int(np.argmax(h[sel]))]
-        zf = sel[int(np.argmax(fv[sel]))]
-        zb = sel[int(np.argmin(fv[sel]))]
         keep(f"{z}_width_a", zl)
         keep(f"{z}_width_b", zr)
         keep(f"{z}_vertex", zt)
@@ -918,10 +952,10 @@ def outer_measurements(skull_p, lc, ant, post, affine, mid, up, lr, fwd, base_h)
         # the foot of this region's height, straight down from its own highest point,
         # so the height is a line and not only a number
         pts[f"{z}_height_foot"] = [round(float(v), 2)
-                                   for v in (W[zt] - (h[zt] - base_h) * up)]
-        out[f"{z}_width"] = round(float(lane[zr] - lane[zl]), 1)
-        out[f"{z}_height"] = round(float(h[zt] - base_h), 1)
-        out[f"{z}_length"] = round(float(fv[zf] - fv[zb]), 1)
+                                   for v in (W[zt] - (h[zt] - floor) * up)]
+        out[f"{z}_width"] = round(wgot[0], 1)
+        out[f"{z}_height"] = round(float(h[zt] - floor), 1)
+        out[f"{z}_length"] = round(lgot[0], 1)
 
     out["points"] = pts
     # The axes every one of these was taken along. Without them a viewer can only draw
@@ -1276,7 +1310,7 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
                                   "percent_of_icv": round(frac[g], 1)}
                               for g, v in LABEL_VALUES.items()}}
     # the outside of the same head, in the same frame, over the same three regions
-    lin = outer_measurements(seg_out / "total" / "skull.nii.gz", lc, ant, post,
+    lin = outer_measurements(seg_out / "total" / "skull.nii.gz", vol, lc, ant, post,
                              affine, mid, up, lr, fwd, float(h.min()))
     if lin:
         stats["outer_mm"] = lin

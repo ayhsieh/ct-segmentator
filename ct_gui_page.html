@@ -2385,10 +2385,17 @@ async function viewseg(name, cse, focus) {
     svg.setAttribute("height", r.height);
     svg.style.left = (r.left - sr.left) + "px";
     svg.style.top = (r.top - sr.top) + "px";
-    let out = "";
+    let out = "", shown = 0;    /* labels step up so two lines do not write over each other */
     for (const m of MEAS) {
       if (!mOn.has(m.key) || m.value !== undefined) continue;
-      if (m.ring) {                       /* a circumference is a loop, not a line */
+      if (m.ring) {
+        /* A loop lies flat in one plane. Seen from either of the other two its points
+           fall on one line, which is not a circumference and not worth drawing. */
+        const spread = (pl) => {
+          const v = m.ring.map(p => p[pl].i);
+          return (Math.max(...v) - Math.min(...v)) * sliceMM(pl);
+        };
+        if (spread(S.plane) > 12) continue;
         const on = m.ring.filter(p =>
           Math.abs(p[S.plane].i - at) * sliceMM() <= NEAR_MM);
         if (on.length < 3 && m.key !== FOCUS) continue;
@@ -2417,8 +2424,9 @@ async function viewseg(name, cse, focus) {
         + `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"></line>`
         + `<circle cx="${a.x}" cy="${a.y}"></circle>`
         + `<circle cx="${b.x}" cy="${b.y}"></circle>`
-        + `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}"`
+        + `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8 - 9 * shown}"`
         + ` text-anchor="middle" stroke-width="1.6">${esc(m.label)} ${m.mm} mm</text></g>`;
+      shown++;
     }
     svg.innerHTML = out;
   }
