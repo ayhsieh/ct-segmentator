@@ -87,7 +87,11 @@ def cut_axes(frame, key, ends):
 def recut(vol, aff, centre, e1, e2):
     """One oblique slice through centre, spanned by e1 and e2, in millimetres."""
     t = np.arange(-HALF, HALF + STEP, STEP)
-    u, v = np.meshgrid(t, t, indexing="xy")
+    # rows are e2 and columns e1, which is the order imshow draws in: row to y,
+    # column to x. Building it the other way round and transposing on the way to
+    # the screen puts the picture at right angles to the line drawn over it, and
+    # a head is round enough that this still looks like a head.
+    v, u = np.meshgrid(t, t, indexing="ij")
     world = (centre[None, None, :] + u[..., None] * e1 + v[..., None] * e2)
     inv = np.linalg.inv(aff)
     vox = world @ inv[:3, :3].T + inv[:3, 3]
@@ -141,7 +145,7 @@ def panel(ax, vol, aff, mm, pts, frame, key, a, b, label, colour, look):
     centre = seed + (d @ e1) * e1 + (d @ e2) * e2
 
     img = recut(vol, aff, centre, e1, e2)
-    ax.imshow(img.T, cmap="gray", vmin=WL - WW / 2, vmax=WL + WW / 2,
+    ax.imshow(img, cmap="gray", vmin=WL - WW / 2, vmax=WL + WW / 2,
               origin="lower", extent=[-HALF, HALF, -HALF, HALF],
               interpolation="bilinear")
 
@@ -221,13 +225,124 @@ def page(pdf, project, case, stats):
     return True
 
 
+def check_recut():
+    """Does the cut land the world point (u, v) on the pixel drawn at (u, v)?
+
+    A re-cut of a head looks like a head whichever way round it is built, so a
+    picture at right angles to the line drawn over it passes the eye and fails
+    the anatomy. Asked of a made-up volume the question has an exact answer and
+    no thresholds: fill one with a straight ramp, which linear interpolation
+    reproduces to the last decimal, and cut it at an angle that shares no axis
+    with the grid. Every pixel must equal the ramp read at the world point the
+    drawing code would put that pixel at.
+    """
+    shape = (40, 42, 44)
+    # float64, so the only error left is the one being looked for: in float32 a
+    # ramp reaching 440000 carries a hundredth of rounding, and the smallest
+    # mistake worth catching - a single voxel along the first axis - is 1.0
+    g = np.mgrid[0:shape[0], 0:shape[1], 0:shape[2]].astype(np.float64)
+    vol = 1.0 * g[0] + 100.0 * g[1] + 10000.0 * g[2]
+    c, s = np.cos(0.4), np.sin(0.4)
+    aff = np.array([[1.4 * c, -0.9 * s, 0.0, -11.0],
+                    [1.4 * s, 0.9 * c, 0.0, 7.0],
+                    [0.0, 0.0, 2.1, -30.0],
+                    [0.0, 0.0, 0.0, 1.0]])
+    inv = np.linalg.inv(aff)
+    # the middle of the made-up volume, so the cut is inside it and the test has
+    # something to test - centred anywhere else, every sample falls off the grid,
+    # reads air, agrees with nothing, and passes
+    centre = aff[:3, :3] @ (np.array(shape, float) / 2) + aff[:3, 3]
+    e1 = np.array([0.6, -0.8, 0.0])
+    e2 = np.array([0.48, 0.36, 0.8])
+
+    half, step = 6.0, 1.5
+    t = np.arange(-half, half + step, step)
+    saved = globals()["HALF"], globals()["STEP"]
+    globals()["HALF"], globals()["STEP"] = half, step
+    try:
+        pic = recut(vol, aff, centre, e1, e2)
+    finally:
+        globals()["HALF"], globals()["STEP"] = saved
+
+    worst, seen = 0.0, 0
+    for r, v in enumerate(t):
+        for cix, u in enumerate(t):
+            vx = inv[:3, :3] @ (centre + u * e1 + v * e2) + inv[:3, 3]
+            if (vx < 0).any() or (vx > np.array(shape) - 1).any():
+                continue            # off the grid, where the cut reads air
+            seen += 1
+            want = 1.0 * vx[0] + 100.0 * vx[1] + 10000.0 * vx[2]
+            worst = max(worst, abs(float(pic[r, cix]) - want))
+    print("cut lands within %.4f over %d of %d samples"
+          % (worst, seen, len(t) ** 2))
+    return seen == len(t) ** 2 and worst < 1e-3
+
+
+def selftest(project, case):
+    """The cut in the abstract, then the same cut through a real head."""
+    if not check_recut():
+        raise SystemExit("the picture is not square with the line drawn on it")
+
+    stats = load_stats(project, case)
+    o = ((stats or {}).get("outer_mm") or {})
+    ct = find_source_nifti(project, case)
+    if not o.get("points") or not ct:
+        raise SystemExit("%s / %s has no measurements to check" % (project, case))
+    pts, frame = o["points"], o["frame"]
+    img = nib.load(str(ct))
+    vol = np.asarray(img.dataobj, dtype=np.float32)
+    inv = np.linalg.inv(img.affine)
+    look = np.array([v for k, v in pts.items() if k != "ofc_ring"],
+                    float).mean(axis=0)
+
+    ok = n = 0
+    worst = (0.0, "")
+    for key, a, b, label, colour in MEASURES:
+        if b is None or o.get(key) is None or a not in pts or b not in pts:
+            continue
+        ends = np.array([pts[a], pts[b]], float)
+        e1, e2, view = cut_axes(frame, key, ends)
+        seed = ends.mean(axis=0)
+        d = look - seed
+        centre = seed + (d @ e1) * e1 + (d @ e2) * e2
+        pic = recut(vol, img.affine, centre, e1, e2)
+        d = ends - centre
+        col = (d @ e1 + HALF) / STEP
+        row = (d @ e2 + HALF) / STEP
+        for c, r, w in zip(col, row, ends):
+            v = inv[:3, :3] @ w + inv[:3, 3]
+            want = float(map_coordinates(vol, v.reshape(3, 1), order=1,
+                                         mode="constant", cval=-1024.0)[0])
+            got = float(map_coordinates(pic, np.array([[r], [c]]), order=1,
+                                        mode="constant", cval=-1024.0)[0])
+            n += 1
+            ok += abs(got - want) < 30
+            if abs(got - want) > worst[0]:
+                worst = (abs(got - want), label)
+    # On a real head the two readings differ a little wherever an endpoint sits on
+    # a bone edge: the panel resamples the CT and is then read again, and 1500 HU
+    # per millimetre turns a fraction of a pixel into a hundred HU. A picture at
+    # right angles to its line reads air where there is bone, which is thousands.
+    print("panel matches the CT at %d of %d endpoints" % (ok, n))
+    if worst[1]:
+        print("worst gap %.0f HU at %s" % worst)
+    if worst[0] > 400:
+        raise SystemExit("the picture and the line it carries do not agree")
+    print("measure sheet : draws where it samples")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", nargs="+", default=["fossa"])
     ap.add_argument("--case", nargs="+", default=None)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--selftest", action="store_true",
+                    help="check the drawing against the CT and stop")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest(args.project[0], (args.case or ["SAMPLE1"])[0])
 
     jobs = []
     for p in args.project:
