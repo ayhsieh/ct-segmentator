@@ -61,11 +61,13 @@ ZONE_NAME = {LABEL_VALUES["anterior_fossa"]: "anterior",
 WASH = 0.15
 
 
-# What each kind of measurement runs along, what the other picture axis should be,
-# and what such a cut is called. A width paired with forward gives a level cut, which
-# is where you can see whether both ends sit on the widest part of the vault; a length
-# and a height both want up in the picture, so a head still looks like a head.
-KINDS = (("height", "up", "left_right", "coronal"),
+# What each kind of measurement runs along, what the other picture axis should be, and
+# what such a cut is called. A width paired with forward gives a level cut, which is
+# where you can see whether both ends sit on the widest part of the vault. A length and
+# a height both want up in the picture, so a head still looks like a head - and a height
+# pairs with forward rather than left-right, because the three fossae are divided front
+# to back and a sagittal cut is the one that shows which of them a height ends in.
+KINDS = (("height", "up", "forward", "sagittal"),
          ("length", "forward", "up", "sagittal"),
          ("width", "left_right", "forward", "axial"))
 
@@ -93,13 +95,14 @@ def cut_axes(frame, key, ends):
     line = v / n if n > 1e-6 else np.array(frame[along], float)
     if line @ np.array(frame[along], float) < 0:    # same way up as the anatomy
         line = -line
-    # A height that leans has to be shown in the plane it leans in. Cranial height is
-    # basion to bregma and slants a long way back, so pairing every height with
-    # left-right and calling it coronal draws the one view in which that line is a
-    # dot. Let the lean pick the partner instead.
-    if along == "up" and abs(line @ np.array(frame["forward"], float)) > \
-            abs(line @ np.array(frame["left_right"], float)):
-        other, view = "forward", "sagittal"
+    # A height that leans sideways is the exception and has to be shown in the plane
+    # it leans in. The margin keeps that choice out of the hands of rounding: a height
+    # that is truly vertical leans by nothing in either direction, and whichever of
+    # the two noise happened to make larger would otherwise pick the view.
+    if along == "up":
+        sideways = abs(line @ np.array(frame["left_right"], float))
+        if sideways > abs(line @ np.array(frame["forward"], float)) + 0.2:
+            other, view = "left_right", "coronal"
     rest = np.array(frame[other], float)
     rest = rest - (rest @ line) * line
     m = np.linalg.norm(rest)
