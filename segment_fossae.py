@@ -964,7 +964,7 @@ def to_inner_cortex(cut, icv2d, start, toward, reach=220.0):
 
 
 def cranial_vault_heights(ct_path, icv, seg_out, group, case, affine, mid, up, fwd,
-                          glabella, opisthocranion, bone_ctx=None):
+                          glabella, opisthocranion, vertex=None, bone_ctx=None):
     """The three cranial heights, the turricephaly index and the bossing angle.
 
     Returns (numbers, points, why_not). Nothing is guessed: a head CT taken for the
@@ -1073,6 +1073,15 @@ def cranial_vault_heights(ct_path, icv, seg_out, group, case, affine, mid, up, f
     out["landmarks_from"] = {k: v for k, v in how.items() if v}
     if fm is not None:
         out["foramen_magnum_ap"] = round(fm, 1)
+    # Cranial height as craniometry has always meant it: basion to bregma, a straight
+    # line in the midsagittal plane, slanted because basion sits well behind bregma.
+    # Bregma is where the coronal and sagittal sutures meet and nothing here segments
+    # sutures, so the vertex stands in for it - the usual substitute on CT - and the
+    # name says which of the two was used.
+    if BA is not None and vertex is not None:
+        V = cut.flat(vertex)
+        out["basion_vertex_height"] = round(float(np.linalg.norm(V - BA)), 1)
+        pts["vertex_for_bregma"] = [round(float(v), 2) for v in cut.world(V)]
 
     # the B point of the index is "the most anterior portion of the frontal bone",
     # which is the point this pipeline already calls glabella
@@ -1186,14 +1195,51 @@ def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, 
     keep("opisthocranion", oi)
     length = float(np.linalg.norm(W[gi] - W[oi]))
 
-    # ---- height: the foramen magnum, where the intracranial volume stops, to the vertex
+    # ---- height: the vertex straight down to the brain space under it.
+    #
+    # Not to the foramen magnum. That is where the intracranial volume stops, but it
+    # stops there about forty millimetres behind the vertex and below the midline, so
+    # a vertical drop from the vertex by that distance ends in the nasal cavity - a
+    # line through the face, labelled as the height of the head.
+    #
+    # This is not the craniometric cranial height either, which is basion to bregma:
+    # a slanted line in the midsagittal plane, taken between two named landmarks.
+    # That one is measured in cranial_vault_heights, where basion is found, and is
+    # called what it is. This is the plain vertical height of the head at its tallest
+    # point, and both of its ends are on anatomy you can see.
     vi = int(np.argmax(h))
     keep("vertex", vi)
-    height = float(h[vi] - base_h)
-    # the foot of that height, straight down the head's own vertical from the vertex,
-    # so the measurement can be drawn as the line it is rather than inferred
-    pts["height_foot"] = [round(float(v), 2)
-                          for v in (W[vi] - (h[vi] - base_h) * up)]
+
+    cl = cf = ch = clab = None
+    if comps is not None:
+        cidx = np.argwhere(comps > 0)
+        if len(cidx):
+            CW = cidx @ affine[:3, :3].T + affine[:3, 3]
+            cl, cf = (CW - mid) @ lr, (CW - mid) @ fwd
+            ch = (CW - mid) @ up
+            clab = comps[tuple(cidx.T)]
+
+    def floor_under(pick, lane0, fv0, near=4.0):
+        """The bottom of the brain space in the column under one point.
+
+        Widened once rather than twice: a column that catches nothing at 4 mm is
+        over a place the compartment does not reach, and the answer there is the
+        compartment's own lowest point, not a wider and wider guess."""
+        if ch is None:
+            return None
+        for reach in (near, 3 * near):
+            m = pick & (np.abs(cl - lane0) <= reach) & (np.abs(cf - fv0) <= reach)
+            if m.any():
+                return float(ch[m].min())
+        return float(ch[pick].min()) if pick.any() else None
+
+    everywhere = None if clab is None else np.ones(len(clab), bool)
+    floor = (floor_under(everywhere, lane[vi], fv[vi])
+             if everywhere is not None else None)
+    if floor is None:
+        floor = base_h
+    height = float(h[vi] - floor)
+    pts["height_foot"] = [round(float(v), 2) for v in (W[vi] - height * up)]
 
     out = {"length_ofd": round(length, 1),
            "width_bpd": round(width, 1),
@@ -1237,26 +1283,15 @@ def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, 
     zone = np.full(len(lane), 2, np.uint8)              # middle
     zone[fv < p_at] = 3                                 # posterior
     zone[(fv >= p_at) & (fv > a_at)] = 1                # anterior
-    # Each region is measured from its own floor, not from the foramen magnum. The
-    # anterior fossa floor sits far above it, so a common baseline drew the height of
-    # the front of the head as a line from the vault down past the orbit to the skull
-    # base - a true distance through anatomy that is not the anterior fossa.
-    floors = {}
-    if comps is not None:
-        cidx = np.argwhere(comps > 0)
-        if len(cidx):
-            CW = cidx @ affine[:3, :3].T + affine[:3, 3]
-            ch = (CW - mid) @ up
-            clab = comps[tuple(cidx.T)]
-            for z, value in (("anterior", 1), ("middle", 2), ("posterior", 3)):
-                m = clab == value
-                if m.any():
-                    floors[z] = float(ch[m].min())
+    # Each region's height is taken straight down from its own highest point to its
+    # own floor UNDER THAT POINT. Its lowest point anywhere will not do: the middle
+    # fossa dips forty millimetres out to the side at the temporal floor, nowhere
+    # near the top of the head, so a drop from the vertex by that distance ends
+    # twelve millimetres inside the skull base.
     for z, value in (("anterior", 1), ("middle", 2), ("posterior", 3)):
         sel = np.flatnonzero(zone == value)
         if len(sel) < 50:
             continue
-        floor = floors.get(z, base_h)
         wgot = level_extremes(sel, lane, h, fv)     # widest across
         lgot = level_extremes(sel, fv, h, lane)     # longest front to back
         if not wgot or not lgot:
@@ -1269,13 +1304,15 @@ def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, 
         keep(f"{z}_vertex", zt)
         keep(f"{z}_front", zf)
         keep(f"{z}_back", zb)
-        # the foot of this region's height, straight down from its own highest point,
-        # so the height is a line and not only a number
-        pts[f"{z}_height_foot"] = [round(float(v), 2)
-                                   for v in (W[zt] - (h[zt] - floor) * up)]
         out[f"{z}_width"] = round(wgot[0], 1)
-        out[f"{z}_height_to_floor"] = round(float(h[zt] - floor), 1)
         out[f"{z}_length"] = round(lgot[0], 1)
+        zfloor = (floor_under(clab == value, lane[zt], fv[zt])
+                  if clab is not None else None)
+        if zfloor is not None:
+            tall = float(h[zt] - zfloor)
+            pts[f"{z}_height_foot"] = [round(float(v), 2)
+                                       for v in (W[zt] - tall * up)]
+            out[f"{z}_height_to_floor"] = round(tall, 1)
 
     out["points"] = pts
     # The axes every one of these was taken along. Without them a viewer can only draw
@@ -1641,7 +1678,8 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
             vault, vpts, why = cranial_vault_heights(
                 ct_path, icv, seg_out, group, case, affine, mid, up, fwd,
                 lin["points"].get("glabella"),
-                lin["points"].get("opisthocranion"), bone_ctx)
+                lin["points"].get("opisthocranion"),
+                lin["points"].get("vertex"), bone_ctx)
         except Exception as e:
             vault, vpts, why = {}, {}, f"{type(e).__name__}: {e}"
         if vault:

@@ -93,6 +93,13 @@ def cut_axes(frame, key, ends):
     line = v / n if n > 1e-6 else np.array(frame[along], float)
     if line @ np.array(frame[along], float) < 0:    # same way up as the anatomy
         line = -line
+    # A height that leans has to be shown in the plane it leans in. Cranial height is
+    # basion to bregma and slants a long way back, so pairing every height with
+    # left-right and calling it coronal draws the one view in which that line is a
+    # dot. Let the lean pick the partner instead.
+    if along == "up" and abs(line @ np.array(frame["forward"], float)) > \
+            abs(line @ np.array(frame["left_right"], float)):
+        other, view = "forward", "sagittal"
     rest = np.array(frame[other], float)
     rest = rest - (rest @ line) * line
     m = np.linalg.norm(rest)

@@ -1539,7 +1539,7 @@ def _resample_labels(lab, laff, ct):
 MEASURES = [
     ("width_bpd", "euryon_a", "euryon_b", "width", "#ff4d3d"),
     ("length_ofd", "glabella", "opisthocranion", "length", "#2bb3ff"),
-    ("height", "height_foot", "vertex", "height", "#3ddc84"),
+    ("height", "height_foot", "vertex", "head height at the vertex", "#3ddc84"),
     ("circumference_ofc", "ofc_ring", None, "circumference", "#f2c14e"),
     ("anterior_width", "anterior_width_a", "anterior_width_b", "anterior width",
      "#c88bff"),
@@ -1568,6 +1568,9 @@ MEASURES = [
     ("posterior_cranial_height", "posterior_cranial_foot", "posterior_cranial_top",
      "posterior cranial height", "#ff8ab4"),
     # the baseline itself, and the hole its back end is measured from
+    # cranial height as craniometry means it: basion to bregma, slanted, midsagittal
+    ("basion_vertex_height", "basion", "vertex_for_bregma", "cranial height (Ba-Br)",
+     "#ff8ab4"),
     ("sella_nasion", "sella", "nasion", "sella-nasion", "#9ecbff"),
     ("foramen_magnum_ap", "basion", "opisthion", "foramen magnum", "#9ecbff"),
 ]
