@@ -44,7 +44,7 @@ from ct_gui import MEASURES, RATIOS                   # noqa: E402
 HALF = 105.0        # mm each way from the middle of the line
 STEP = 0.6          # mm per pixel in the re-cut picture
 WL, WW = 300.0, 1500.0                                # bone window
-COLS, ROWS = 4, 5     # 19 panels and a corner for the numbers
+COLS = 4            # rows follow from how many measurements a case has
 
 # The compartment a regional measurement belongs to gets the colour that
 # measurement is drawn in, so "does the line sit in its own fossa" is one look
@@ -276,8 +276,13 @@ def page(pdf, project, case, stats):
     # the middle of the head, so every panel frames the same skull
     look = np.array([v for k, v in pts.items() if k != "ofc_ring"], float).mean(axis=0)
 
-    fig, axes = plt.subplots(ROWS, COLS, figsize=(11.0, 14.2))
-    fig.suptitle("%s / %s" % (project, case), fontsize=11, y=0.985)
+    # as many rows as this case actually fills, plus the corner for the numbers.
+    # Most cases have no cranial heights, since those need landmarks not every scan
+    # contains, and a fixed grid would print two empty rows on every one of them.
+    have = sum(o.get(m[0]) is not None for m in MEASURES)
+    rows = max(2, -(-(have + 1) // COLS))
+    fig, axes = plt.subplots(rows, COLS, figsize=(11.0, 2.75 * rows + 0.5))
+    fig.suptitle("%s / %s" % (project, case), fontsize=11, y=0.99)
     flat = axes.ravel()
     gaps, i = {}, 0
     for key, a, b, label, colour in MEASURES:
@@ -291,7 +296,7 @@ def page(pdf, project, case, stats):
     numbers_block(flat[i], o, gaps, lab)
     for ax in flat[i + 1:]:
         ax.set_axis_off()
-    fig.tight_layout(rect=[0, 0, 1, 0.975])
+    fig.tight_layout(rect=[0, 0, 1, 1 - 0.5 / (2.75 * rows + 0.5)])
     pdf.savefig(fig, dpi=110)
     plt.close(fig)
     return True
