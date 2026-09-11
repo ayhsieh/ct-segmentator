@@ -44,7 +44,7 @@ from ct_gui import MEASURES, RATIOS                   # noqa: E402
 HALF = 105.0        # mm each way from the middle of the line
 STEP = 0.6          # mm per pixel in the re-cut picture
 WL, WW = 300.0, 1500.0                                # bone window
-COLS, ROWS = 4, 4
+COLS, ROWS = 4, 5     # 19 panels and a corner for the numbers
 
 # The compartment a regional measurement belongs to gets the colour that
 # measurement is drawn in, so "does the line sit in its own fossa" is one look
@@ -83,7 +83,11 @@ def cut_axes(frame, key, ends):
     a height claims the vertical one and stays vertical, a width and a length claim
     the horizontal one. The head then fills in the other, square to the line.
     """
-    along, other, view = next((a, o, v) for k, a, o, v in KINDS if k in key)
+    # anything that is not one of the three - the sella-nasion baseline, the foramen
+    # magnum - runs front to back down the midline, so it reads off the same cut a
+    # length does
+    along, other, view = next(((a, o, v) for k, a, o, v in KINDS if k in key),
+                              ("forward", "up", "sagittal"))
     v = np.asarray(ends[-1], float) - np.asarray(ends[0], float)
     n = np.linalg.norm(v)
     line = v / n if n > 1e-6 else np.array(frame[along], float)
@@ -272,7 +276,7 @@ def page(pdf, project, case, stats):
     # the middle of the head, so every panel frames the same skull
     look = np.array([v for k, v in pts.items() if k != "ofc_ring"], float).mean(axis=0)
 
-    fig, axes = plt.subplots(ROWS, COLS, figsize=(11.0, 11.6))
+    fig, axes = plt.subplots(ROWS, COLS, figsize=(11.0, 14.2))
     fig.suptitle("%s / %s" % (project, case), fontsize=11, y=0.985)
     flat = axes.ravel()
     gaps, i = {}, 0

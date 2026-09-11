@@ -60,7 +60,7 @@ COLORS = {
     "middle_fossa": "0.150 0.550 0.900",
     "posterior_fossa": "0.150 0.800 0.300",
 }
-MANUAL_LABELS = ("g", "o", "n", "s", "op",
+MANUAL_LABELS = ("g", "o", "n", "s", "op", "ba",
                  "ACP(L)", "ACP(R)", "ZMF(L)", "ZMF(R)", "PR(L)", "PR(R)")
 SEED_GROUPS = {
     "anterior_fossa": ("frontal_lobe",),
@@ -770,6 +770,326 @@ def hull_perimeter(pts):
 MIDLINE_MM = 5.0        # half-thickness of the slab that counts as the midsagittal plane
 
 
+# ---------------------------------------------- the midsagittal cut and its landmarks
+# Anterior, middle and posterior cranial height have a settled definition in the
+# craniofacial literature. Measured in the midsagittal plane, they run "from the
+# nasion, sella and basion, respectively, to the inner cortex of the calvarium in a
+# line perpendicular to a line connecting the sella and nasion" - the wording is the
+# same in the posterior vault distraction series (Childs Nerv Syst 2024, PMC11322207)
+# and in the J Neurosurg Pediatr 2022 report from the same group.
+#
+# What matters about that construction is that all three share one baseline and one
+# direction, which is what lets the three numbers be compared with each other. Heights
+# taken from each region's own fossa floor cannot be: the anterior fossa floor sits far
+# above the posterior one, so the front of the head always reads short for a reason
+# that has nothing to do with the vault.
+#
+# The same paper gives two indices that fall out of the same landmarks, so they are
+# taken here too rather than left for a second pass over the same pictures:
+#   turricephaly index    fronto-occipital length over middle cranial height
+#   frontal bossing angle between the sella-nasion line and nasion to the most
+#                         anterior point of the frontal bone
+MIDSAG_HALF = 130.0     # mm each way from the head's origin; must clear glabella
+MIDSAG_STEP = 0.5       # mm per pixel of the cut
+BONE_HU = 200.0
+
+
+class MidsagittalCut:
+    """One head's midsagittal picture, with millimetres on both axes.
+
+    Landmarks are read here and not off the voxels. The head's own up axis is
+    oblique to the slices, so binning voxels by it aliases badly: a 1 mm bin catches
+    one slice's worth of scattered voxels, and "how far forward does bone reach at
+    this height" comes back pointing at the occiput. A reformat is regular and
+    isotropic - and it is the picture these measurements are defined on anyway.
+
+    Coordinates are (up, forward) millimetres from the head frame's origin, in that
+    order, because rows are up and columns are forward.
+    """
+
+    def __init__(self, ct, affine, origin, fwd, up):
+        self.affine, self.origin, self.fwd, self.up = affine, origin, fwd, up
+        self.shape = ct.shape
+        self.t = np.arange(-MIDSAG_HALF, MIDSAG_HALF + MIDSAG_STEP, MIDSAG_STEP)
+        self.ct = self.cut(ct)
+        self.bone = self.ct >= BONE_HU
+
+    def cut(self, vol, order=1, cval=-1024.0):
+        from scipy.ndimage import map_coordinates
+        up_mm, fwd_mm = np.meshgrid(self.t, self.t, indexing="ij")
+        world = (self.origin[None, None, :] + fwd_mm[..., None] * self.fwd
+                 + up_mm[..., None] * self.up)
+        inv = np.linalg.inv(self.affine)
+        vox = world @ inv[:3, :3].T + inv[:3, 3]
+        return map_coordinates(vol, [vox[..., 0], vox[..., 1], vox[..., 2]],
+                               order=order, mode="constant", cval=cval)
+
+    def mask(self, vol):
+        return self.cut(np.asarray(vol, np.float32), order=0, cval=0.0) > 0.5
+
+    def ix(self, v):
+        return int(round((v + MIDSAG_HALF) / MIDSAG_STEP))
+
+    def mm(self, i):
+        return -MIDSAG_HALF + np.asarray(i, float) * MIDSAG_STEP
+
+    def flat(self, w):
+        """A world point as (up, forward) millimetres on this picture."""
+        d = np.asarray(w, float) - self.origin
+        return np.array([d @ self.up, d @ self.fwd])
+
+    def world(self, p):
+        """(up, forward) millimetres back to a world point."""
+        return self.origin + float(p[1]) * self.fwd + float(p[0]) * self.up
+
+    def scanned(self, p):
+        """Is this place inside the volume, rather than off the end of the scan?
+
+        Asked of the voxel grid and not of the Hounsfield numbers: air inside a head
+        reads the same as the nothing outside one, so a test on HU calls a nasal
+        airway unscanned."""
+        v = np.linalg.inv(self.affine)[:3, :3] @ self.world(p) \
+            + np.linalg.inv(self.affine)[:3, 3]
+        return bool(np.all((v >= 0) & (v <= np.array(self.shape, float) - 1)))
+
+    def front_of_bone(self):
+        """For each row, how far forward bone reaches. NaN where the row has none."""
+        out = np.full(self.bone.shape[0], np.nan)
+        rows = np.flatnonzero(self.bone.any(axis=1))
+        out[rows] = self.mm([int(np.flatnonzero(r)[-1]) for r in self.bone[rows]])
+        return out
+
+
+def find_nasion(cut, glabella, near=8.0, far=32.0, turn=1.5):
+    """The notch in the front profile under glabella: the nasal root.
+
+    Searched only where a nasal root can be, and required to be a real notch -
+    bone has to turn back on both sides of it, and it may not sit against either
+    end of the band. Take the deepest point of a wide band instead and a scan
+    whose field of view stops at the face hands back the edge of its own data,
+    which is not a landmark and is not even in the patient.
+    """
+    gy, _ = cut.flat(glabella)
+    fr = cut.front_of_bone()
+    band = np.arange(max(0, cut.ix(gy - far)), min(len(fr), cut.ix(gy - near)))
+    band = band[np.isfinite(fr[band])]
+    if len(band) < 12:
+        return None
+    k = int(np.argmin(fr[band]))
+    if k < 3 or k > len(band) - 4:
+        return None
+    i = int(band[k])
+    if fr[band[:k]].max() - fr[i] < turn or fr[band[k + 1:]].max() - fr[i] < turn:
+        return None
+    return np.array([cut.mm(i), fr[i]])
+
+
+def find_sella(cut, clinoid_mid, deep=22.0):
+    """The middle of the pituitary fossa, dropped from the clinoid midpoint.
+
+    The anterior clinoids stand at the mouth of the fossa, so the point between them
+    is its entrance and not the centre that cephalometry calls sella. The floor is
+    found by going straight down to the next bone, and the landmark sits halfway
+    between the two - the centre of the outline.
+    """
+    cy, cx = cut.flat(clinoid_mid)
+    j, top = cut.ix(cx), cut.ix(cy)
+    if not (0 <= j < cut.bone.shape[1] and 0 < top <= cut.bone.shape[0]):
+        return None
+    lo = max(0, top - int(deep / MIDSAG_STEP))
+    col = np.flatnonzero(cut.bone[lo:top, j])
+    if not len(col):
+        return None
+    return np.array([(cy + cut.mm(lo + int(col[-1]))) / 2.0, cx])
+
+
+def find_foramen_magnum(cut, c1, reach=16.0, wide=30.0):
+    """Basion and opisthion: the two lips of the hole, found from the bone below it.
+
+    The foramen magnum sits directly on the first vertebra, so C1 says where to look,
+    and having C1 as its own mask means the skull above it can be told apart from the
+    vertebra it rests on. The two lips are then the lowest skull bone either side of
+    the midline in the band just above C1.
+
+    The brain space cannot be used for this even though it stops near the same place.
+    Its floor is the pipeline's own flat cut, which sits above the rim and in front of
+    it, and the bone nearest that floor is the clivus and the occipital squama where
+    they have already converged - about half the width of the real hole.
+    """
+    if c1 is None or not c1.any():
+        return None, None
+    rows = np.flatnonzero(c1.any(axis=1))
+    top = int(rows[-1])
+    cx = cut.mm(float(np.nonzero(c1)[1].mean()))
+
+    band = np.zeros_like(cut.bone)
+    hi = min(cut.bone.shape[0], top + int(reach / MIDSAG_STEP))
+    band[top:hi] = cut.bone[top:hi]
+    band &= ~c1
+    by, bx = np.nonzero(band)
+    if len(by) < 20:
+        return None, None
+    Y, X = cut.mm(by), cut.mm(bx)
+    keep = np.abs(X - cx) < wide
+    Y, X = Y[keep], X[keep]
+    out = []
+    for ahead in (True, False):
+        side = (X > cx) if ahead else (X < cx)
+        if side.sum() < 5:
+            out.append(None)
+            continue
+        k = int(np.argmin(np.where(side, Y, np.inf)))
+        out.append(np.array([Y[k], X[k]]))
+    return out[0], out[1]
+
+
+def to_inner_cortex(cut, icv2d, start, toward, reach=220.0):
+    """From a skull-base landmark up to the inner cortex of the vault above it.
+
+    The inner cortex is taken as where the ray leaves the intracranial volume, that
+    volume being bounded by exactly that surface. Reading it off the bone instead
+    would mean deciding which of the several bone edges along the way is the vault.
+    """
+    steps = np.arange(0.0, reach, MIDSAG_STEP)
+    pts = start[None, :] + steps[:, None] * toward[None, :]
+    rr = np.round((pts[:, 0] + MIDSAG_HALF) / MIDSAG_STEP).astype(np.int64)
+    cc = np.round((pts[:, 1] + MIDSAG_HALF) / MIDSAG_STEP).astype(np.int64)
+    ok = ((rr >= 0) & (rr < icv2d.shape[0]) & (cc >= 0) & (cc < icv2d.shape[1]))
+    hit = np.zeros(len(steps), bool)
+    hit[ok] = icv2d[rr[ok], cc[ok]]
+    if not hit.any():
+        return None, None
+    last = int(np.flatnonzero(hit)[-1])
+    return float(steps[last]), pts[last]
+
+
+def cranial_vault_heights(ct_path, icv, seg_out, group, case, affine, mid, up, fwd,
+                          glabella, opisthocranion, bone_ctx=None):
+    """The three cranial heights, the turricephaly index and the bossing angle.
+
+    Returns (numbers, points, why_not). Nothing is guessed: a head CT taken for the
+    brain is often cropped at the skull base, at the face, or both, and no detector
+    recovers what was never scanned. When a landmark is missing the heights are left
+    out and `why_not` says which one, so a blank in the table can be read.
+    """
+    cut = MidsagittalCut(np.asarray(nib.load(str(ct_path)).dataobj, np.float32),
+                         affine, mid, fwd, up)
+    icv2d = cut.mask(icv)
+    if not icv2d.any():
+        return {}, {}, "the midline cut misses the brain"
+
+    # A hand-placed point always wins. These are landmarks cephalometry places by
+    # hand in every paper that uses them, the project already reads them from
+    # <group>/points/, and no profile-reading beats someone looking at the scan.
+    hand = load_manual_landmarks(group, case)
+    pred = predicted_landmarks(group, case, seg_out, bone_ctx or {})
+    clin = None
+    for pair in (("ACP(L)", "ACP(R)"), None):
+        src, keys = (hand, pair) if pair else (pred, ("clinoid_left",
+                                                     "clinoid_right"))
+        if keys[0] in src and keys[1] in src:
+            clin = (np.asarray(src[keys[0]], float)
+                    + np.asarray(src[keys[1]], float)) / 2
+            break
+
+    c1_p = Path(seg_out) / "total" / "vertebrae_C1.nii.gz"
+    c1 = cut.mask(np.asarray(nib.load(str(c1_p)).dataobj)) if c1_p.exists() else None
+
+    # Where each landmark came from travels with the numbers. Cephalometry places
+    # these by hand in every paper that uses them, and the automatic finders here are
+    # a convenience that works on some scans and declines on others - so a reader has
+    # to be able to tell which kind of number they are looking at without guessing.
+    how = {}
+    N, S = None, None
+    if "n" in hand:
+        N, how["nasion"] = cut.flat(hand["n"]), "placed by hand"
+    else:
+        N = find_nasion(cut, glabella)
+        how["nasion"] = "found on the profile" if N is not None else None
+    if "s" in hand:
+        S, how["sella"] = cut.flat(hand["s"]), "placed by hand"
+    elif clin is not None:
+        S = find_sella(cut, clin)
+        how["sella"] = "dropped from the clinoids" if S is not None else None
+    BA, OP = find_foramen_magnum(cut, c1)
+    how["basion"] = "found above C1" if BA is not None else None
+    if "ba" in hand:
+        BA, how["basion"] = cut.flat(hand["ba"]), "placed by hand"
+    if "op" in hand:
+        OP = cut.flat(hand["op"])
+    # Nasion and sella define the baseline, so without both there is no measurement
+    # at all. Basion only names where the posterior one is taken from, so a scan that
+    # stops above the foramen magnum still gets the other two rather than nothing.
+    missing = [n for n, v in (("nasion", N), ("sella", S)) if v is None]
+    if missing:
+        return {}, {}, "no " + " or ".join(missing) + " in this scan"
+
+    # Three shapes the head has to have. A landmark found on the wrong bone still
+    # produces three tidy numbers, and nothing downstream can tell. These are wide
+    # enough for a small child and still catch a nasion that landed on the orbit or
+    # a rim found on the ring of C1.
+    length = float(np.linalg.norm(N - S))
+    for ok, why in (
+            (40.0 <= length <= 100.0,
+             "sella and nasion came out %.0f mm apart" % length),
+            (N[1] - S[1] >= 30.0,
+             "nasion sits only %.0f mm in front of sella" % (N[1] - S[1])),
+            # The anterior cranial base climbs from the pituitary fossa to the nasal
+            # root; every skull has nasion well above sella. A scan whose field of
+            # view stops at the face has no nasal root in it, and the notch found in
+            # what remains comes out level with sella or under it.
+            (N[0] - S[0] >= 8.0,
+             "nasion came out %.0f mm above sella" % (N[0] - S[0]))):
+        if not ok:
+            return {}, {}, why
+    # A foramen magnum the wrong size means the scan stopped above the real rim and
+    # the two lips were found on whatever bone was lowest instead. Drop basion and
+    # keep the other two heights rather than publishing a posterior one built on it.
+    fm = None if (BA is None or OP is None) else float(np.linalg.norm(BA - OP))
+    if BA is not None and (N[0] <= BA[0] or (fm is not None
+                                             and not 22.0 <= fm <= 48.0)):
+        BA, OP, fm = None, None, None
+    span = (N - S) / length
+    # perpendicular to sella-nasion, pointing at the vault
+    toward = np.array([span[1], -span[0]])
+    if toward[0] < 0:
+        toward = -toward
+
+    out, pts = {}, {}
+    for name, mark in (("anterior", N), ("middle", S), ("posterior", BA)):
+        if mark is None:
+            continue
+        high, tip = to_inner_cortex(cut, icv2d, mark, toward)
+        if high is None:
+            continue
+        out[name + "_cranial_height"] = round(high, 1)
+        pts[name + "_cranial_foot"] = [round(float(v), 2) for v in cut.world(mark)]
+        pts[name + "_cranial_top"] = [round(float(v), 2) for v in cut.world(tip)]
+    for name, mark in (("nasion", N), ("sella", S), ("basion", BA),
+                       ("opisthion", OP)):
+        if mark is not None:
+            pts[name] = [round(float(v), 2) for v in cut.world(mark)]
+    out["sella_nasion"] = round(length, 1)
+    out["landmarks_from"] = {k: v for k, v in how.items() if v}
+    if fm is not None:
+        out["foramen_magnum_ap"] = round(fm, 1)
+
+    # the B point of the index is "the most anterior portion of the frontal bone",
+    # which is the point this pipeline already calls glabella
+    gy, gx = cut.flat(glabella)
+    boss = np.array([gy, gx]) - N
+    if np.linalg.norm(boss) > 5:
+        cosine = float(np.dot(boss / np.linalg.norm(boss), span))
+        out["frontal_bossing_deg"] = round(
+            float(np.degrees(np.arccos(np.clip(cosine, -1, 1)))), 1)
+    mid_h = out.get("middle_cranial_height")
+    if mid_h and opisthocranion is not None:
+        fo = float(np.linalg.norm(np.asarray(glabella, float)
+                                  - np.asarray(opisthocranion, float)))
+        out["turricephaly_index"] = round(fo / mid_h, 3)
+    return out, pts, None
+
+
 def level_extremes(sel, along, l1, l2, step=3.0, least=8):
     """The two points of `sel` furthest apart along `along` that are level in both
     other axes.
@@ -954,7 +1274,7 @@ def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, 
         pts[f"{z}_height_foot"] = [round(float(v), 2)
                                    for v in (W[zt] - (h[zt] - floor) * up)]
         out[f"{z}_width"] = round(wgot[0], 1)
-        out[f"{z}_height"] = round(float(h[zt] - floor), 1)
+        out[f"{z}_height_to_floor"] = round(float(h[zt] - floor), 1)
         out[f"{z}_length"] = round(lgot[0], 1)
 
     out["points"] = pts
@@ -1317,6 +1637,23 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
         log("outer: length %.0f  width %.0f  height %.0f  CI %.0f"
             % (lin["length_ofd"], lin["width_bpd"], lin["height"],
                lin["cranial_index"] or 0), 2)
+        try:
+            vault, vpts, why = cranial_vault_heights(
+                ct_path, icv, seg_out, group, case, affine, mid, up, fwd,
+                lin["points"].get("glabella"),
+                lin["points"].get("opisthocranion"), bone_ctx)
+        except Exception as e:
+            vault, vpts, why = {}, {}, f"{type(e).__name__}: {e}"
+        if vault:
+            lin.update(vault)
+            lin["points"].update(vpts)
+            log("cranial heights: anterior %.0f  middle %.0f  posterior %.0f"
+                % (vault.get("anterior_cranial_height", 0),
+                   vault.get("middle_cranial_height", 0),
+                   vault.get("posterior_cranial_height", 0)), 2)
+        else:
+            lin["cranial_heights_missing"] = why
+            log(f"cranial heights skipped: {why}", 2)
     else:
         log("no total/skull mask - outer measurements skipped", 2)
     if frac["anterior_fossa"] > 30 or frac["anterior_fossa"] < 5 \

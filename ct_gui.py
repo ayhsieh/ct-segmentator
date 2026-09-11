@@ -1543,27 +1543,42 @@ MEASURES = [
     ("circumference_ofc", "ofc_ring", None, "circumference", "#f2c14e"),
     ("anterior_width", "anterior_width_a", "anterior_width_b", "anterior width",
      "#c88bff"),
-    ("anterior_height", "anterior_height_foot", "anterior_vertex", "anterior height",
-     "#c88bff"),
+    ("anterior_height_to_floor", "anterior_height_foot", "anterior_vertex",
+     "anterior height to floor", "#c88bff"),
     ("anterior_length", "anterior_back", "anterior_front", "anterior length",
      "#c88bff"),
     ("middle_width", "middle_width_a", "middle_width_b", "middle width", "#ffb648"),
-    ("middle_height", "middle_height_foot", "middle_vertex", "middle height",
-     "#ffb648"),
+    ("middle_height_to_floor", "middle_height_foot", "middle_vertex",
+     "middle height to floor", "#ffb648"),
     ("middle_length", "middle_back", "middle_front", "middle length", "#ffb648"),
     ("posterior_width", "posterior_width_a", "posterior_width_b", "posterior width",
      "#7de0d0"),
-    ("posterior_height", "posterior_height_foot", "posterior_vertex",
-     "posterior height", "#7de0d0"),
+    ("posterior_height_to_floor", "posterior_height_foot", "posterior_vertex",
+     "posterior height to floor", "#7de0d0"),
     ("posterior_length", "posterior_back", "posterior_front", "posterior length",
      "#7de0d0"),
+    # The three the craniofacial literature means by anterior, middle and posterior
+    # cranial height: from nasion, sella and basion, perpendicular to the
+    # sella-nasion line, to the inner cortex of the vault. One baseline for all
+    # three, so unlike the heights above they can be compared with each other.
+    ("anterior_cranial_height", "anterior_cranial_foot", "anterior_cranial_top",
+     "anterior cranial height", "#ff8ab4"),
+    ("middle_cranial_height", "middle_cranial_foot", "middle_cranial_top",
+     "middle cranial height", "#ff8ab4"),
+    ("posterior_cranial_height", "posterior_cranial_foot", "posterior_cranial_top",
+     "posterior cranial height", "#ff8ab4"),
+    # the baseline itself, and the hole its back end is measured from
+    ("sella_nasion", "sella", "nasion", "sella-nasion", "#9ecbff"),
+    ("foramen_magnum_ap", "basion", "opisthion", "foramen magnum", "#9ecbff"),
 ]
 
 # Numbers with no two points to draw between. They still belong in the list, because
 # the list is what this case measures - and each is defined where the width was taken,
 # so clicking one goes to that slice.
 RATIOS = [("cranial_index", "cranial index", ""),
-          ("point_of_max_width", "widest point", "% back")]
+          ("point_of_max_width", "widest point", "% back"),
+          ("turricephaly_index", "turricephaly index", ""),
+          ("frontal_bossing_deg", "frontal bossing", "deg")]
 
 
 def measurement_lines(group, case, shape, zooms, aff):
