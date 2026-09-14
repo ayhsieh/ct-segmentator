@@ -253,12 +253,14 @@ ANALYSES = {
         "blurb": "anterior / middle / posterior compartments from the skull-floor map",
         "script": "segment_fossae.py",
         "needs": ["brain_structures"],
+        "proof": "*fossae_simple.stats.json",
     },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
         "script": "brain_icv.py",
         "needs": ["brain_structures"],
+        "proof": "brain_icv.stats.json",
     },
 }
 
@@ -793,7 +795,7 @@ def prereq_steps(project, cases):
     return out
 
 
-def job_analysis(project, kind, cases, device, license_no=""):
+def job_analysis(project, kind, cases, device, license_no="", force=False):
     """Segment everything the analysis will need, then analyse.
 
     The analysis scripts can segment what they find missing themselves, and that is
@@ -813,7 +815,14 @@ def job_analysis(project, kind, cases, device, license_no=""):
         if license_no and task in LICENSED_TASKS:
             argv += ["--license-number", license_no]
         steps.append((f"{case} - {task}", argv))
+    seg = seg_dir_for(project)
     for case in cases:
+        # A case that already holds this analysis gets no step. The scripts skip such
+        # a case themselves, but only after a fresh interpreter has imported torch to
+        # find out - a second each, and on a project of four hundred it was most of
+        # the run and all of the progress bar.
+        if not force and list((seg / case).glob(spec["proof"])):
+            continue
         argv = PY + [spec["script"], "--group", project, "--case", case,
                      "--device", device]
         if kind == "brain_icv":
@@ -2400,7 +2409,8 @@ class Handler(BaseHTTPRequestHandler):
                 for a in analyses:
                     if a in ANALYSES:
                         ids.append(submit(
-                            job_analysis(name, a, cases, device, lic)).id)
+                            job_analysis(name, a, cases, device, lic,
+                                         bool(body.get("force")))).id)
                 if not ids:
                     return self._json({"error": "nothing selected"}, 400)
                 return self._json({"jobs": ids})
