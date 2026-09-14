@@ -417,7 +417,21 @@ def prompt_series_selection(dicom_folder, scored_series, folder_key, cache):
             print("  Invalid input, please enter a number.")
 
 
-def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=False):
+def task_done(seg_out, task, roi_subset=None):
+    """Has this task already produced what was asked of it?
+
+    The multilabel file is the proof - except when specific structures were named,
+    where the proof is those structures on disk. A run from before a structure joined
+    the subset leaves a task.seg.nrrd without it, and calling that done means the mask
+    can never be made: every later run sees the file, skips, and is asked again.
+    """
+    if not (seg_out / f"{task}.seg.nrrd").exists():
+        return False
+    return all((seg_out / task / f"{r}.nii.gz").exists() for r in (roi_subset or ()))
+
+
+def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=False,
+                     roi_subset=None):
     # all_folders is a list of (dicom_folder, group_name) tuples
     """
     Pass 1: Scan all folders and resolve series selections.
@@ -456,10 +470,8 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
             if force_redo:
                 tasks_to_run.append(task)
                 continue
-            # We mark a task "done" if its multilabel file exists
-            existing_segnrrd = seg_out / f"{task}.seg.nrrd" if seg_out.exists() else None
-            if existing_segnrrd and existing_segnrrd.exists():
-                print(f"[SKIP] '{dicom_folder.name}' task '{task}' - already exists: {existing_segnrrd.name}")
+            if task_done(seg_out, task, roi_subset):
+                print(f"[SKIP] '{dicom_folder.name}' task '{task}' - already done")
             else:
                 tasks_to_run.append(task)
 
@@ -887,7 +899,8 @@ def main():
     # Resolve work items (series selection)
     work_items = plan_all_folders(all_folders, cache, tasks,
                                    skip_manual=args.skip_planning,
-                                   force_redo=args.force_redo)
+                                   force_redo=args.force_redo,
+                                   roi_subset=args.roi_subset)
 
     if not work_items:
         print("\nNo folders to process. Exiting.")
