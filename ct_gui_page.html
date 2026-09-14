@@ -1299,18 +1299,22 @@ async function series(name, job, plan, cases) {
      - during the scan as well as after it - and keeps its place once it is answered.
      Cards that vanish as they are dealt with move the row under the pointer, leave
      nothing to look back at, and take away any chance to change your mind. Switching
-     the filter off and on builds the list again from whatever is still waiting. */
+     the filter off and on builds the list again from whatever is still waiting.
+
+     What counts as waiting is `unresolved`, the same set the tally counts. Asking the
+     cards instead - each carrying its own flag - let the two drift apart, and a screen
+     saying three cases need a series while showing none of them is the result. */
   const onlywait = document.getElementById("onlywait");
-  let filtered = null;
+  let shown = null;
   function applyFilter() {
     for (const [cse, el] of Object.entries(slots)) {
       if (!el) continue;
-      if (filtered && el.dataset.wait === "1") filtered.add(cse);
-      el.hidden = !!filtered && !filtered.has(cse);
+      if (shown && unresolved.has(cse)) shown.add(cse);
+      el.hidden = !!shown && !shown.has(cse);
     }
   }
   onlywait.onchange = () => {
-    filtered = onlywait.checked ? new Set() : null;
+    shown = onlywait.checked ? new Set() : null;
     applyFilter();
   };
 
@@ -1366,8 +1370,15 @@ async function series(name, job, plan, cases) {
       if (slots[cse] && slots[cse].dataset.done === "1") continue;
       const card = render(cse, r);
       if (slots[cse]) { slots[cse].replaceWith(card); slots[cse] = card; }
-      else cs.append(card);
+      else { cs.append(card); slots[cse] = card; }
       card.dataset.done = "1";
+      /* Recorded as each case comes back, not once the whole scan is over: the filter
+         and the tally both read this, and a list that fills in as the answers arrive
+         is the point of scanning case by case. */
+      if (r.error || r.decision === "manual" || r.decision === "none") {
+        blockers.add(cse);
+        if (!skipped.has(cse)) unresolved.add(cse);
+      }
       /* Recorded as soon as it is worked out, not when the run starts: the reading is
          the expensive part, and losing it because the page was closed means doing it
          all again. Reversible from the card. */
@@ -1389,9 +1400,7 @@ async function series(name, job, plan, cases) {
     .map(([c]) => c);
   const unseen = Object.entries(last)
     .filter(([, r]) => !r.error && r.decision === "auto").map(([c]) => c);
-  blocking.forEach(c => blockers.add(c));
-  blocking.filter(c => !skipped.has(c)).forEach(c => unresolved.add(c));
-  retest();
+  retest();          /* blockers and unresolved were filled in as results arrived */
 
   if (!plan) return;
 
@@ -1412,7 +1421,6 @@ async function series(name, job, plan, cases) {
     if (r.error) {
       const bad = $(`<div class="card"><h3>${esc(cse)}</h3>
         <div class="note warn">${esc(r.error)}</div></div>`);
-      bad.dataset.wait = "1";
       return bad;
     }
     const badge = {cached:'<span class="pill on">already chosen</span>',
@@ -1431,7 +1439,6 @@ your series choice is kept; untick to bring it back."><input
           <tbody></tbody></table></div>
         <div class="prevslot"></div>
       </div></div>`);
-    if (r.decision === "manual" || r.decision === "none") card.dataset.wait = "1";
     if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
     const tb = card.querySelector("tbody");
     if (r.quick) {
@@ -1481,7 +1488,6 @@ your series choice is kept; untick to bring it back."><input
           card.querySelector(".pill").outerHTML =
             '<span class="pill on">chosen by you</span>';
           delete autoPick[cse];          /* the user's pick is already written */
-          card.dataset.wait = "";        /* answered - but it stays on screen */
           unresolved.delete(cse); retest();
           if (res.cleared_nifti)
             card.append($(`<div class="note amber">The old image was removed, so this
@@ -1504,11 +1510,10 @@ your series choice is kept; untick to bring it back."><input
     const sk = card.querySelector(".skipck");
     if (!sk) return;
     sk.checked = !!skipped.has(cse);
-    if (sk.checked) card.dataset.wait = "";
     sk.onchange = async () => {
       skipped[sk.checked ? "add" : "delete"](cse);
-      if (sk.checked) { unresolved.delete(cse); card.dataset.wait = ""; }
-      else if (blockers.has(cse)) { unresolved.add(cse); card.dataset.wait = "1"; }
+      if (sk.checked) unresolved.delete(cse);
+      else if (blockers.has(cse)) unresolved.add(cse);
       retest();
       try { await api("/api/project/skip", {project:name, case:cse, skip:sk.checked}); }
       catch (e) { card.append(err(e)); }
