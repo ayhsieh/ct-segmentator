@@ -883,12 +883,29 @@ def job_scan(project, cases, quick=False):
         # --quick before --scan: --scan takes the rest of the line, so a flag after it
         # is read as a path
         argv = PY + ["ct_gui.py"] + (["--quick"] if quick else []) + ["--scan"]
-        argv += [str(case_dir(project, c)) for c in cases]
+        # The folders go down stdin, not on the command line. Windows caps a command
+        # line at about 32,000 characters, and a project of a few hundred cases at a
+        # hundred characters of absolute path each goes straight past it - the whole
+        # scan then dies with "the filename or extension is too long" before a single
+        # case is read.
+        paths = [str(case_dir(project, c)) for c in cases]
         proc = subprocess.Popen(argv, cwd=str(APP), env=child_env(),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                stdin=subprocess.DEVNULL, text=True, bufsize=1,
+                                stdin=subprocess.PIPE, text=True, bufsize=1,
                                 errors="replace")
         job.proc = proc
+
+        def feed():
+            """From its own thread, because the child starts answering before it has
+            finished being asked: writing the list inline can fill the pipe while the
+            child is blocked filling its own, and the two wait on each other."""
+            try:
+                with proc.stdin as fh:
+                    fh.write("\n".join(paths) + "\n")
+            except OSError:
+                pass                             # child already gone; stdout says why
+
+        threading.Thread(target=feed, daemon=True).start()
         for line in proc.stdout:                 # a case at a time, as each finishes
             line = line.strip()
             if not line.startswith("{"):
@@ -2470,8 +2487,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--open", action="store_true", help="open a browser too")
-    ap.add_argument("--scan", nargs="+", metavar="PATH",
-                    help="internal: score the series of one or more folders")
+    ap.add_argument("--scan", nargs="*", metavar="PATH",
+                    help="internal: score the series of one or more folders; with no "
+                         "paths, read them from stdin, one per line")
     ap.add_argument("--quick", action="store_true",
                     help="internal: with --scan, answer from the recorded choice "
                          "without reading the series again")
@@ -2480,8 +2498,15 @@ def main():
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
-    if args.scan:
-        for path in args.scan:
+    if args.scan is not None:
+        # given on the line, or fed in a folder at a time - either way, scanned as
+        # they arrive, so the first result comes back without waiting for the list
+        # strip a byte-order mark too: some shells put one at the head of a pipe, and
+        # it turns a real folder into one that does not exist with nothing to see
+        source = args.scan or (ln.strip().lstrip("﻿") for ln in sys.stdin)
+        for path in source:
+            if not path:
+                continue
             try:
                 out = scan_folder(path, quick=args.quick)
             except Exception as e:
