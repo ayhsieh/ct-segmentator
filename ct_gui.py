@@ -253,14 +253,14 @@ ANALYSES = {
         "blurb": "anterior / middle / posterior compartments from the skull-floor map",
         "script": "segment_fossae.py",
         "needs": ["brain_structures"],
-        "proof": "*fossae_simple.stats.json",
+        "proofs": ["*fossae_simple.stats.json"],
     },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
         "script": "brain_icv.py",
         "needs": ["brain_structures"],
-        "proof": "brain_icv.stats.json",
+        "proofs": ["brain_icv.stats.json"],
     },
 }
 
@@ -779,19 +779,28 @@ PREREQS = [("brain_structures", [], ["brain_structures/*.nii.gz"]),
             ["total/brain.nii.gz", "total/skull.nii.gz"])]
 
 
+def has_output(project, case, proofs):
+    """Whether a case already holds everything a step would produce.
+
+    One rule for prerequisites and analyses alike. The scripts all skip a case they
+    have already done, but only once a fresh interpreter has imported torch to find
+    out - a second a case, and on a project of four hundred that is the whole run.
+    """
+    d = seg_dir_for(project) / case
+    return all(list(d.glob(pat)) for pat in proofs)
+
+
 def prereq_steps(project, cases):
     """(case, task, extra) for every prerequisite a run would have to segment first.
 
     One answer, used twice: to build the steps, and to decide whether a licence number
     is needed. Asked separately they drifted, and the interface demanded a licence for
     a run whose licensed mask every case already had."""
-    seg = seg_dir_for(project)
     out = []
     for case in cases:
         for task, extra, proofs in PREREQS:
-            if all(list((seg / case).glob(pat)) for pat in proofs):
-                continue
-            out.append((case, task, extra))
+            if not has_output(project, case, proofs):
+                out.append((case, task, extra))
     return out
 
 
@@ -815,13 +824,8 @@ def job_analysis(project, kind, cases, device, license_no="", force=False):
         if license_no and task in LICENSED_TASKS:
             argv += ["--license-number", license_no]
         steps.append((f"{case} - {task}", argv))
-    seg = seg_dir_for(project)
     for case in cases:
-        # A case that already holds this analysis gets no step. The scripts skip such
-        # a case themselves, but only after a fresh interpreter has imported torch to
-        # find out - a second each, and on a project of four hundred it was most of
-        # the run and all of the progress bar.
-        if not force and list((seg / case).glob(spec["proof"])):
+        if not force and has_output(project, case, spec["proofs"]):
             continue
         argv = PY + [spec["script"], "--group", project, "--case", case,
                      "--device", device]
