@@ -32,7 +32,34 @@ import os
 import pathlib
 
 from ct_dates import study_date
-from ct_paths import seg_dir_for, nifti_dir_for
+from ct_paths import group_dir, seg_dir_for, nifti_dir_for
+
+
+def project_cases(group):
+    """Every case the project lists, in the order it lists them.
+
+    A case that was set aside, or that never converted, has no results folder - so
+    reading the results folder alone quietly drops it, and a case missing from a cohort
+    table is exactly the one worth seeing. Empty for a group made on the command line,
+    which has no project.json; the results folder covers that.
+    """
+    try:
+        text = (group_dir(group) / "project.json").read_text(encoding="utf-8")
+        return [c["case"] for c in json.loads(text).get("cases", []) if c.get("case")]
+    except Exception:
+        return []
+
+
+def case_notes(group):
+    """Whatever was written about each case on the project screen, by case name.
+
+    Read straight off project.json. Going through the server module would drag the
+    whole interface, and torch behind it, into a CSV build."""
+    try:
+        text = (group_dir(group) / "project.json").read_text(encoding="utf-8")
+        return json.loads(text).get("notes", {})
+    except Exception:
+        return {}
 
 
 # Everything millilitres, so any two columns can be read against each other. The unit
@@ -66,7 +93,9 @@ def read_stats(task, d):
     """
     if not isinstance(d, dict):
         return
-    if task.endswith("fossae_simple") or "compartments" in d:
+    # a linear-only file carries outer_mm and no compartments at all
+    if (task.endswith("fossae_simple") or "compartments" in d
+            or "outer_mm" in d):
         if isinstance(d.get("icv_ml"), (int, float)):
             yield ("fossae", "icv_ml"), d["icv_ml"]
         # the outside of the head, filed on its own so a table of sizes does not have
@@ -124,12 +153,17 @@ def main():
 
     total_dir = seg_dir_for(args.group)
     nifti_dir = nifti_dir_for(args.group)
-    if not total_dir.is_dir():
-        raise SystemExit(f"no such results folder: {total_dir}. Run "
-                         "segment_structures.py on this group first.")
 
-    cases = [p.name for p in total_dir.iterdir()
-            if p.is_dir() and not p.name.startswith(".")]
+    # Every case in the project, plus any results folder the project does not list.
+    # A row with nothing but a name and a note is the honest record of a case that was
+    # set aside or never finished; leaving it out makes the cohort look complete.
+    done = sorted(p.name for p in total_dir.iterdir()
+                  if p.is_dir() and not p.name.startswith(".")) if total_dir.is_dir() else []
+    listed = project_cases(args.group)
+    cases = listed + [c for c in done if c not in set(listed)]
+    if not cases:
+        raise SystemExit(f"no cases for {args.group}: neither {total_dir} nor a "
+                         "project.json lists any. Run segment_structures.py first.")
     rows = {case: {} for case in cases}
 
     for case in cases:
@@ -147,12 +181,21 @@ def main():
                 if wanted(t, name):
                     rows[case][f"{t}_{name}"] = val
 
+    # Always, whatever columns were asked for: a note is the reason a row looks the
+    # way it does, and it is no use in a file that dropped it.
+    notes = case_notes(args.group)
+    for case in cases:
+        rows[case]["note"] = notes.get(case, "")
+
     for case in cases if wanted("_scan") else []:
         # the date of the series this case was segmented from, not of whatever DICOM
         # the folder happens to hold first
         d, note = study_date(args.group, case)
         rows[case]["study_date"] = d
-        if note:
+        # Only when there IS a date and it might be the wrong one. With no date the
+        # blank already says so, and saying it again put a sentence on every row of a
+        # cohort that had simply not been run yet.
+        if d and note:
             rows[case]["study_date_note"] = note
         nifti_case_dir = nifti_dir / case
         if not nifti_case_dir.is_dir():
@@ -173,8 +216,13 @@ def main():
         except Exception:
             rows[case]["num_slices"] = None
 
-    df = pd.DataFrame.from_dict(rows, orient="index")
+    # reindex: from_dict does not keep the insertion order once the rows carry
+    # different keys, and the table should read in the order the project lists its
+    # cases - the same order the Cases tab shows.
+    df = pd.DataFrame.from_dict(rows, orient="index").reindex(cases)
     df.index.name = "case"
+    if "note" in df.columns:          # next to the name it belongs to, not at the end
+        df = df[["note"] + [c for c in df.columns if c != "note"]]
     out = args.out or str(total_dir / f"{args.group}_structure_volumes_ml.csv")
     df.to_csv(out)
     print(f"{len(cases)} case(s) -> {out}")
