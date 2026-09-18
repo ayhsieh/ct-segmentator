@@ -255,6 +255,14 @@ ANALYSES = {
         "needs": ["brain_structures"],
         "proofs": ["*fossae_simple.stats.json"],
     },
+    "linear": {
+        "label": "Cranial linear measurements",
+        "blurb": "width, length, height, circumference and the cranial heights",
+        "script": "segment_fossae.py",
+        "args": ["--linear-only"],
+        "needs": ["brain_structures"],
+        "proofs": ["*cranial_linear.stats.json"],
+    },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
@@ -561,12 +569,34 @@ def case_status(group, case):
             if stem in AVAILABLE_TASKS or stem in LICENSED_TASKS:
                 done.append(stem)
     fossa = bool(list(d.glob("*fossae_simple.stats.json"))) if d.is_dir() else False
+    linear = bool(list(d.glob("*cranial_linear.stats.json"))) if d.is_dir() else False
     icv = (d / "brain_icv.stats.json").exists() if d.is_dir() else False
     traced = bool(list(d.glob("*_traced.json"))) if d.is_dir() else False
     nii = nifti_dir_for(group) / case
-    return {"case": case, "tasks": sorted(done), "fossae": fossa, "brain_icv": icv,
+    return {"case": case, "tasks": sorted(done), "fossae": fossa, "linear": linear,
+            "brain_icv": icv,
             "traced": traced,
             "converted": bool(list(nii.glob("*.nii.gz"))) if nii.is_dir() else False}
+
+
+def set_note(pr, case, text):
+    """Write a case's note onto the project, and return what was stored.
+
+    Whatever you want to say about a case, in your own words - why it was set aside,
+    which timepoint it is, that the head is tilted. Nothing in the pipeline reads it;
+    it is here so the reason for a decision outlives the afternoon you made it.
+
+    An empty note is no note, so it is removed rather than kept as an empty string -
+    otherwise a project accumulates a key per case you ever clicked on.
+    """
+    notes = dict(pr.get("notes", {}))
+    text = (text or "").strip()[:2000]
+    if text:
+        notes[case] = text
+    else:
+        notes.pop(case, None)
+    pr["notes"] = notes
+    return text
 
 
 def project_state(name):
@@ -580,6 +610,7 @@ def project_state(name):
         st["online"] = link.exists()
         st["source"] = c.get("series_root", c.get("path", ""))
         st["skipped"] = c["case"] in set(pr.get("skipped", []))
+        st["note"] = pr.get("notes", {}).get(c["case"], "")
         cases.append(st)
     pr = dict(pr)
     pr["case_status"] = cases
@@ -633,7 +664,7 @@ class Job:
 JOBS = {}
 _CACHE_LOCK = threading.Lock()
 JOB_ORDER = deque(maxlen=200)
-QUEUES = {"gpu": queue.Queue(), "light": queue.Queue()}
+QUEUES = {"gpu": queue.Queue(), "light": queue.Queue(), "now": queue.Queue()}
 LOCK = threading.Lock()
 
 
@@ -828,7 +859,7 @@ def job_analysis(project, kind, cases, device, license_no="", force=False):
         if not force and has_output(project, case, spec["proofs"]):
             continue
         argv = PY + [spec["script"], "--group", project, "--case", case,
-                     "--device", device]
+                     "--device", device] + list(spec.get("args", ()))
         if kind == "brain_icv":
             argv.append("--no-segment")
         steps.append((f"{case} - {spec['label']}", argv))
@@ -884,7 +915,7 @@ def table_columns(project):
     return {"cases": len(cases), "tasks": out}
 
 
-def job_scan(project, cases, quick=False):
+def job_scan(project, cases, quick=False, waiting=False):
     """Score the DICOM series of each case, out of process so the server never imports
     torch, and so one unreadable folder cannot take the server down."""
     results = {}
@@ -939,7 +970,10 @@ def job_scan(project, cases, quick=False):
             results.setdefault(c, {"error": (err or "scan failed")[-800:]})
 
     steps = [(f"reading {len(cases)} case(s)", run)]
-    job = Job("scan", project, f"scan {len(cases)} case(s)", steps, queue_name="light")
+    # `waiting` means someone is looking at a spinner for this one, so it does not
+    # go behind a batch that will take an hour.
+    job = Job("scan", project, f"scan {len(cases)} case(s)", steps,
+              queue_name="now" if waiting else "light")
     job.results = results
     return job
 
@@ -1393,6 +1427,24 @@ class NeedsConvert(RuntimeError):
     offers to convert - where an ordinary error would only be reported."""
 
 
+def converted_series(path):
+    """Which series the converted image came from, read off its own file name.
+
+    Conversion writes `series_<number>_<description>.nii.gz`, so the file itself is the
+    record of what was used - and it is the file the viewer is drawing, which is the
+    thing a person wants named. A name in any other shape just gives back no number.
+    """
+    stem = Path(path).name
+    for suffix in (".nii.gz", ".nii"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    bits = stem.split("_", 2)
+    if len(bits) < 2 or bits[0] != "series" or not bits[1].isdigit():
+        return {"snum": "", "desc": stem}
+    return {"snum": bits[1], "desc": bits[2] if len(bits) > 2 else ""}
+
+
 def _ct_path(group, case):
     d = nifti_dir_for(group) / case
     hits = sorted(d.glob("*.nii.gz")) if d.is_dir() else []
@@ -1738,6 +1790,7 @@ def view_case(group, case):
     except Exception as e:                      # a measurement must not cost the viewer
         measures, _ = [], warnings.append(f"measurements unavailable: {e}")
     return {"project": group, "case": case, "shape": shape, "zooms": zooms,
+            "series": converted_series(p),
             "planes": planes, "presets": WINDOW_PRESETS, "default": "bone",
             "stamp": max(stamps), "layers": layers, "warnings": warnings,
             "measures": measures}
@@ -2326,6 +2379,16 @@ class Handler(BaseHTTPRequestHandler):
                 save_project(pr)
                 return self._json({"skipped": pr["skipped"]})
 
+            if u.path == "/api/project/note":
+                name = self._project(body)
+                pr = load_project(name)
+                case = body.get("case") or ""
+                if not any(c["case"] == case for c in pr.get("cases", [])):
+                    return self._json({"error": f"no case {case} in {name}"}, 400)
+                text = set_note(pr, case, body.get("note"))
+                save_project(pr)
+                return self._json({"note": text})
+
             if u.path == "/api/project/describe":
                 name = self._project(body)
                 pr = load_project(name)
@@ -2354,7 +2417,8 @@ class Handler(BaseHTTPRequestHandler):
                 pr = load_project(name)
                 cases = body.get("cases") or [c["case"] for c in pr["cases"]]
                 return self._json({"job": submit(
-                    job_scan(name, cases, quick=bool(body.get("quick")))).id})
+                    job_scan(name, cases, quick=bool(body.get("quick")),
+                             waiting=bool(body.get("waiting")))).id})
 
             if u.path == "/api/convert":
                 name = self._project(body)
