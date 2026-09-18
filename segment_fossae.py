@@ -1271,6 +1271,12 @@ def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, 
         pts["ofc_ring"] = [[round(float(v), 2) for v in
                             (mid + a * lr + b * fwd + peak_h * up)] for a, b in ring]
 
+    # Without the fossa boundaries there is nothing to divide the head by, so the
+    # whole-skull measurements above are all there is to report.
+    if lc is None or ant is None or post is None:
+        out["points"] = pts
+        return out
+
     # ---- Anterior, middle and posterior by the same rule that divides the volumes:
     # the two boundaries are curves that bend from lane to lane, not flat cuts, so each
     # skull voxel is put on one side or the other of the curve at its own lane. Using
@@ -1478,7 +1484,43 @@ def head_frame_adjusted(up_adjust, up, lr, mid, fwd, how, tilt, yaw, dice):
     return up, lr, mid, fwd, how, tilt, yaw, dice
 
 
+def measure_outside(stats, seg_out, vol, lc, ant, post, affine, mid, up, lr, fwd,
+                    base_h, ct_path, icv, group, case, bone_ctx):
+    """Measure the skull from outside and hang the result on `stats`.
+
+    Shared by the fossa run, which has the boundaries and so gets the per-zone widths
+    too, and the linear-only run, which has neither and reports the whole head.
+    """
+    lin = outer_measurements(seg_out / "total" / "skull.nii.gz", vol, lc, ant, post,
+                             affine, mid, up, lr, fwd, base_h)
+    if not lin:
+        log("no total/skull mask - outer measurements skipped", 2)
+        return
+    stats["outer_mm"] = lin
+    log("outer: length %.0f  width %.0f  height %.0f  CI %.0f"
+        % (lin["length_ofd"], lin["width_bpd"], lin["height"],
+           lin["cranial_index"] or 0), 2)
+    try:
+        vault, vpts, why = cranial_vault_heights(
+            ct_path, icv, seg_out, group, case, affine, mid, up, fwd,
+            lin["points"].get("glabella"), lin["points"].get("opisthocranion"),
+            lin["points"].get("vertex"), bone_ctx)
+    except Exception as e:
+        vault, vpts, why = {}, {}, f"{type(e).__name__}: {e}"
+    if vault:
+        lin.update(vault)
+        lin["points"].update(vpts)
+        log("cranial heights: anterior %.0f  middle %.0f  posterior %.0f"
+            % (vault.get("anterior_cranial_height", 0),
+               vault.get("middle_cranial_height", 0),
+               vault.get("posterior_cranial_height", 0)), 2)
+    else:
+        lin["cranial_heights_missing"] = why
+        log(f"cranial heights skipped: {why}", 2)
+
+
 def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
+                 linear_only=False,
                  make_map=True, traced=None, up_adjust=None,
                  posterior="ridge"):
     seg_out = seg_dir_for(group) / case
@@ -1528,6 +1570,20 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
     lane = (W - mid) @ lr
     fv = (W - mid) @ fwd
     del W
+    if linear_only:
+        # Everything the measurements need is the frame and the skull. Stop here and
+        # skip the floor map, the boundary fit and the compartment labelling.
+        stats = {"case": case, "ct": os.path.basename(str(ct_path)),
+                 "method": "measured on the skull, in the head's own frame",
+                 "icv_ml": round(icv_ml, 1),
+                 "up_axis": how, "up_tilt_vs_scanner_deg": round(tilt, 1),
+                 "midsagittal_yaw_deg": round(yaw, 1), "mirror_overlap": round(dice, 3)}
+        measure_outside(stats, seg_out, None, None, None, None, affine, mid, up, lr,
+                        fwd, float(h.min()), ct_path, icv, group, case, bone_ctx)
+        with open(out_path(seg_out, case, name, ".stats.json"), "w") as fh:
+            json.dump(stats, fh, indent=2)
+        return stats
+
     l_edges = np.arange(lane.min() - LANE_MM, lane.max() + 2 * LANE_MM, LANE_MM)
     lc = (l_edges[:-1] + l_edges[1:]) / 2.0
     f0 = float(fv.min())
@@ -1667,33 +1723,8 @@ def process_case(group, case, name, device, use_landmarks=True, bone_ctx=None,
                                   "percent_of_icv": round(frac[g], 1)}
                               for g, v in LABEL_VALUES.items()}}
     # the outside of the same head, in the same frame, over the same three regions
-    lin = outer_measurements(seg_out / "total" / "skull.nii.gz", vol, lc, ant, post,
-                             affine, mid, up, lr, fwd, float(h.min()))
-    if lin:
-        stats["outer_mm"] = lin
-        log("outer: length %.0f  width %.0f  height %.0f  CI %.0f"
-            % (lin["length_ofd"], lin["width_bpd"], lin["height"],
-               lin["cranial_index"] or 0), 2)
-        try:
-            vault, vpts, why = cranial_vault_heights(
-                ct_path, icv, seg_out, group, case, affine, mid, up, fwd,
-                lin["points"].get("glabella"),
-                lin["points"].get("opisthocranion"),
-                lin["points"].get("vertex"), bone_ctx)
-        except Exception as e:
-            vault, vpts, why = {}, {}, f"{type(e).__name__}: {e}"
-        if vault:
-            lin.update(vault)
-            lin["points"].update(vpts)
-            log("cranial heights: anterior %.0f  middle %.0f  posterior %.0f"
-                % (vault.get("anterior_cranial_height", 0),
-                   vault.get("middle_cranial_height", 0),
-                   vault.get("posterior_cranial_height", 0)), 2)
-        else:
-            lin["cranial_heights_missing"] = why
-            log(f"cranial heights skipped: {why}", 2)
-    else:
-        log("no total/skull mask - outer measurements skipped", 2)
+    measure_outside(stats, seg_out, vol, lc, ant, post, affine, mid, up, lr, fwd,
+                    float(h.min()), ct_path, icv, group, case, bone_ctx)
     if frac["anterior_fossa"] > 30 or frac["anterior_fossa"] < 5 \
             or frac["middle_fossa"] < 10 or frac["posterior_fossa"] < 20:
         stats["warning"] = "implausible compartment fractions"
@@ -1711,7 +1742,12 @@ def main():
     ap.add_argument("--group", default="fossa")
     ap.add_argument("--case", nargs="+", default=None,
                     help="one or more case folder names; omit for the whole group")
-    ap.add_argument("--name", default="fossae_simple")
+    ap.add_argument("--name", default=None,
+                    help="what to call the stats file; defaults to fossae_simple, or "
+                         "cranial_linear with --linear-only")
+    ap.add_argument("--linear-only", action="store_true",
+                    help="measure the skull and stop: widths, lengths and the cranial "
+                         "heights, without the skull-floor map or the compartments")
     ap.add_argument("--device", default="gpu", choices=["gpu", "cpu", "mps"])
     ap.add_argument("--no-landmarks", action="store_true",
                     help="use the scanner vertical instead of the glabella-torcula "
@@ -1736,6 +1772,8 @@ def main():
                          "<name>_map.png in the case's results folder)")
     args = ap.parse_args()
 
+    if args.name is None:
+        args.name = "cranial_linear" if args.linear_only else "fossae_simple"
     cases = args.case if args.case else discover_cases(args.group)
     cases = ensure_group_segmented(args.group, cases, args.device)
     # One shared context so the cranial landmark model is loaded once per run,
@@ -1757,6 +1795,7 @@ def main():
             traced = {k: edits[k] for k in ("ant", "post") if k in edits}
             process_case(args.group, c, args.name, args.device,
                          use_landmarks=not args.no_landmarks, bone_ctx=bone_ctx,
+                         linear_only=args.linear_only,
                          make_map=not args.no_map, posterior=args.posterior,
                          traced=traced or None,
                          up_adjust=args.up_adjust or edits.get("up_adjust"))
