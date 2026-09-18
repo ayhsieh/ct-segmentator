@@ -17,6 +17,7 @@
   --serif:Charter,"Iowan Old Style","Source Serif Pro",Georgia,Cambria,"Times New Roman",serif;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--serif);
   font-size:19px;line-height:1.58;-webkit-font-smoothing:antialiased}
@@ -72,7 +73,7 @@ body.railed #side .top{justify-content:center;padding:15px 0 11px}
 body.railed #rail{margin:0}
 .crumb{color:var(--faint);font-family:var(--sans);font-size:14px}
 main{overflow:auto;min-height:0;padding:26px 30px 90px}
-main>#view{max-width:1180px}
+main>#view{max-width:1180px;margin:0 auto}
 /* Prose wants a short line; a table of three hundred cases wants the room. */
 .reading{max-width:660px}
 
@@ -209,15 +210,94 @@ canvas{border:1px solid var(--line);border-radius:6px;cursor:crosshair;
   margin-left:9px;opacity:0;transition:opacity .12s}
 .editable:hover::after,.editable:focus::after{opacity:1}
 .reasons{color:var(--faint);font-size:12px;font-family:var(--sans)}
+/* its own column, and its own name: `.note` is the callout box above */
+#cases td.casenote{font-family:var(--sans);font-size:13px;color:var(--mid);
+  max-width:240px}
+#cases td.casenote input{font-size:13px;padding:4px 7px}
 .right{margin-left:auto}
 /* ---- slice viewer. Two columns: the structure list and the image. Wider than the
    reading column the rest of the tool uses, hence body.wide, set by route(). */
-body.wide main{max-width:1180px}
+/* Wide means wide. This used to repeat the 1180px cap that #view already sets, so the
+   two screens that ask for the monitor never actually got it. */
+body.wide main>#view{max-width:none}
+
+/* ---- picking a series. A queue of the cases on the left, one case on the stage to
+   the right. Choosing a series is a comparison of pictures, so every candidate is on
+   screen at once and each one is a picture, not a row in a table. Only the case on the
+   stage loads previews, which is what makes showing them by default affordable. */
+.serwrap{display:grid;grid-template-columns:262px minmax(0,1fr);
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.serq{border-right:1px solid var(--line);background:var(--panel);display:flex;
+  flex-direction:column;min-height:0;max-height:min(66vh,620px)}
+.qhead{padding:10px 13px;border-bottom:1px solid var(--edge);font-family:var(--sans);
+  font-size:13px;color:var(--mid)}
+#qlist{overflow:auto;flex:1;min-height:0}
+.qi{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:9px;align-items:center;
+  padding:7px 13px;border-bottom:1px solid #ece6da;font-family:var(--sans);
+  font-size:14px;cursor:pointer;color:var(--mid)}
+.qi:hover{background:var(--surface)}
+.qi.on{background:var(--surface);color:var(--ink);font-weight:600;
+  box-shadow:inset 3px 0 0 var(--accent)}
+.qi .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qi .dot{width:8px;height:8px;border-radius:99px;background:var(--amber)}
+.qi.settled .dot{background:var(--accent)}
+.qi.bad .dot{background:var(--warn)}
+.qi.pend .dot{background:var(--edge)}
+.qi .st{font-size:12px;color:var(--faint);font-weight:400;white-space:nowrap}
+.serstage{padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:12px;
+  max-height:min(66vh,620px);overflow:auto}
+.stagehead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.stagehead h2{margin:0;font-size:19px;font-family:ui-monospace,Menlo,Consolas,monospace}
+/* the tiles pack from the left and stop growing, so an ultrawide gets more of them
+   rather than three enormous ones */
+.stiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,320px));gap:12px}
+.stile{border:1px solid var(--line);border-radius:8px;overflow:hidden;
+  background:var(--surface);display:flex;flex-direction:column}
+.stile.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.simg{position:relative;background:#000;aspect-ratio:1}
+.simg img{display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+.sbusy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#8b8b8b;font-family:var(--sans);font-size:12px}
+.sbusy.hide{display:none}
+.ssl{width:100%;margin:0;accent-color:var(--accent);display:block}
+.sbody{padding:9px 11px 2px;display:flex;flex-direction:column;gap:5px;flex:1}
+.srow{display:flex;align-items:baseline;gap:8px}
+.sspec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:1px 10px;margin:0;
+  font-family:var(--sans);font-size:13px}
+.sspec dt{color:var(--faint)}
+.sspec dd{margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+  color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sdesc{font-size:13px;color:var(--mid);font-family:var(--sans)}
+.stile .suse{margin:8px 11px 11px;background:var(--surface);color:var(--ink);
+  border:1px solid var(--edge);font-weight:400}
+.stile .suse:hover{background:var(--panel);opacity:1}
+.stile.on .suse{background:var(--accent);border-color:var(--accent);color:#fff;
+  font-weight:600}
+@media (max-width:900px){
+  .serwrap{grid-template-columns:1fr}
+  .serq{border-right:0;border-bottom:1px solid var(--line);max-height:170px}
+}
 .vwrap{display:grid;grid-template-columns:270px 1fr;gap:16px;align-items:start}
 .vwrap.hide,.vrow[hidden],.vgrp[hidden]{display:none}
 .vside{border:1px solid var(--line);border-radius:10px;background:var(--surface);
   padding:10px;display:flex;flex-direction:column;gap:8px}
 .vtree{overflow:auto;flex:1;min-height:120px;max-height:min(60vh,560px)}
+#vstruct{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
+#vsers{border-bottom:1px solid var(--line);padding-bottom:7px}
+.vsh{font-family:var(--sans);font-size:11.5px;color:var(--faint);padding:0 4px 5px}
+.vsrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;
+  padding:4px 6px;border-radius:5px;font-family:var(--sans);font-size:13px;
+  color:var(--mid);cursor:pointer}
+.vsrow:hover{background:var(--panel)}
+.vsrow.on{background:var(--accentdim);color:var(--accent);font-weight:600}
+.vsrow .sn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.vsrow .sm{font-family:ui-monospace,Menlo,Consolas,monospace}
+.vsrow .sm{font-size:11px;color:var(--faint);font-weight:400}
+.vsrow.on .sm{color:var(--accent)}
+.vsrow .tag{font-size:11px;color:var(--faint)}
+.vsrow.on .tag{color:var(--accent)}
+/* a raw DICOM slice has no millimetre geometry to scale by, so it just fits the well */
+.vstage img.raw{width:auto!important;height:auto!important;max-width:100%;max-height:100%}
 .vgrp{border-top:1px solid var(--line);padding-top:5px;margin-top:5px}
 .vgrp:first-child{border-top:0;margin-top:0;padding-top:0}
 .vgrph,.vrow{display:flex;align-items:center;gap:6px;font-family:var(--sans);
@@ -314,6 +394,9 @@ const $ = (h) => { const t = document.createElement("template");
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const SEP_TAIL = /[\\/][^\\/]*$/;   /* the last path segment, either slash */
+/* What the server sends as WINDOW_PRESETS. Held here too because a case with nothing
+   converted never gets to ask it for them, and it is still a CT either way. */
+const WINDOWS = {bone: [2500, 480], "soft tissue": [400, 50], brain: [80, 40]};
 const g = (id) => document.getElementById(id);
 const view = document.getElementById("view");
 const crumb = document.getElementById("crumb");
@@ -346,6 +429,42 @@ function pending(btn, label) {
   return () => { btn.innerHTML = html; btn.disabled = dis;
                  btn.classList.remove("busy"); };
 }
+/* A line of prose you edit by clicking it. Enter or blur saves, Escape puts it back:
+   no edit button, and no save button to forget to press. Nothing about prose says it
+   can be clicked, so the affordance arrives on hover - see .editable. */
+function editableText(host, opt) {
+  let text = opt.value || "";
+  function rest() {
+    host.innerHTML = "";
+    const d = $(`<div class="editable" tabindex="0" title="Click to edit"
+      style="${text ? "" : "color:var(--faint)"}">${esc(text || opt.placeholder)}</div>`);
+    d.onclick = edit;
+    // Reachable by keyboard too, for the same reason it is reachable by mouse.
+    d.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ")
+                             { e.preventDefault(); edit(); } };
+    host.append(d);
+  }
+  function edit() {
+    host.innerHTML = "";
+    const i = $(`<input type="text" style="max-width:${opt.width || 520}px"
+      placeholder="${esc(opt.placeholder)}">`);
+    i.value = text;
+    let closed = false;
+    const save = async (keep) => {
+      if (closed) return; closed = true;
+      const v = i.value.trim();
+      if (!keep || v === text) return rest();
+      text = v; rest();
+      try { await opt.save(v); } catch (e) { host.append(err(e)); }
+    };
+    i.onkeydown = (e) => { if (e.key === "Enter") save(true);
+                           else if (e.key === "Escape") save(false); };
+    i.onblur = () => save(true);
+    host.append(i); i.focus(); i.select();
+  }
+  rest();
+}
+
 function stopPoll() { if (POLL) { clearInterval(POLL); POLL = null; } }
 function fmtTime(s) {
   s = Math.round(s);
@@ -370,7 +489,28 @@ function nav(v, ...args) {
   if (location.hash === h) route();      /* same screen: re-render, no history entry */
   else location.hash = h;                /* otherwise hashchange does the rendering */
 }
+/* What you had open on a project screen. Only the choices - the data behind them is
+   re-read every time, because a run may have finished while you were away. */
+let PNOW = "";
+const PSTATE = {};
+const ticked = (sel) => [...document.querySelectorAll(sel)].map(i => i.value);
+
+function savePState() {
+  if (!PNOW || !g("ptabs")) return;
+  const on = document.querySelector("#ptabs .tab.on"), box = g("cases");
+  PSTATE[PNOW] = {
+    tab: on ? on.dataset.t : "cases",
+    find: (g("qcase") || {}).value || "",
+    scroll: box ? box.scrollTop : 0,
+    cases: ticked(".ck:checked"),
+    tasks: ticked(".task:checked"),
+    analyses: ticked(".anal:checked"),
+  };
+  PNOW = "";
+}
+
 function route() {
+  savePState();          /* before the screen it belongs to is wiped */
   const parts = location.hash.replace(/^#/, "").split("/")
                   .filter(Boolean).map(decodeURIComponent);
   const v = parts.shift() || "home";
@@ -740,55 +880,20 @@ async function project(name) {
       x.classList.toggle("hide", x.dataset.t !== b.dataset.t));
   };
 
-  /* Click the description to edit it; Enter or blur saves, Escape puts it back. No
-     separate edit button, and no save button to forget to press. */
-  const dbox = document.getElementById("desc");
-  let dtext = st.description || "";
-  function showDesc() {
-    dbox.innerHTML = "";
-    const d = $(`<div class="editable" tabindex="0" title="Click to edit"
-      style="${dtext ? "" : "color:var(--faint)"}"
-      >${esc(dtext || "Add a description")}</div>`);
-    d.onclick = editDesc;
-    // Reachable by keyboard too, for the same reason it is reachable by mouse.
-    d.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ")
-                             { e.preventDefault(); editDesc(); } };
-    dbox.append(d);
-  }
-  function editDesc() {
-    dbox.innerHTML = "";
-    const i = $(`<input type="text" style="max-width:520px"
-      placeholder="What is this project about?">`);
-    i.value = dtext;
-    let closed = false;
-    const save = async (keep) => {
-      if (closed) return; closed = true;
-      if (!keep) return showDesc();
-      const v = i.value.trim();
-      if (v === dtext) return showDesc();
-      dtext = v; showDesc();
-      try { await api("/api/project/describe", {project: name, description: v}); }
-      catch (e) { dbox.append(err(e)); }
-    };
-    i.onkeydown = (e) => { if (e.key === "Enter") save(true);
-                           else if (e.key === "Escape") save(false); };
-    i.onblur = () => save(true);
-    dbox.append(i); i.focus(); i.select();
-  }
-  showDesc();
+  editableText(document.getElementById("desc"), {
+    value: st.description || "",
+    placeholder: "Add a description",
+    save: (v) => api("/api/project/describe", {project: name, description: v}),
+  });
 
   const doneTasks = new Set();
   st.case_status.forEach(c => c.tasks.forEach(x => doneTasks.add(x)));
 
-  document.getElementById("addcases").onclick = async (ev) => {
-    const undo = pending(ev.currentTarget, "Choose a folder…");
-    try {
-      const r = await api("/api/pick", {});
-      undo();
-      if (r.unavailable || !r.path) return nav("add", name);
-      nav("add", name, r.path);
-    } catch (e) { undo(); nav("add", name); }
-  };
+  /* Straight to the screen that offers both a folder and a set of zip files, rather
+     than springing a folder dialog first. Cancelling that dialog had nowhere sensible
+     to land - it dropped you on this screen anyway, looking like something had gone
+     wrong - and it hid the zip option behind a dialog that cannot offer it. */
+  document.getElementById("addcases").onclick = () => nav("add", name);
 
   document.getElementById("scanfolder").onclick = async (ev) => {
     const undo = pending(ev.currentTarget, "Opening…");
@@ -802,20 +907,23 @@ async function project(name) {
   const tbl = $(`<table><thead><tr>
     <th style="width:26px"><input type="checkbox" id="ckall" checked
       title="select or clear every case"></th><th>Case</th>
-    <th>Converted</th><th>Segmented</th><th>Analyses</th><th></th></tr></thead>
+    <th>Converted</th><th>Segmented</th><th>Analyses</th>
+    <th style="width:240px">Note</th><th></th></tr></thead>
     <tbody></tbody></table>`);
   for (const c of st.case_status) {
     const tr = $(`<tr id="row-${esc(c.case)}">
       <td><input type="checkbox" class="ck" ${c.skipped ? "" : "checked"}
         value="${esc(c.case)}"></td>
-      <td><b>${esc(c.case)}</b><div class="meta status"></div></td>
+      <td><b>${esc(c.case)}</b></td>
       <td>${c.converted ? '<span class="pill on">yes</span>' : '<span class="pill">no</span>'}</td>
       <td>${c.tasks.length ? c.tasks.map(x=>`<span class="pill on">${esc(x)}</span>`).join("")
                            : '<span class="pill">none</span>'}</td>
       <td>${c.skipped ? '<span class="pill amber">set aside</span>' : ''}
           ${c.fossae ? '<span class="pill on">fossae</span>' : ''}
+          ${c.linear ? '<span class="pill on">linear</span>' : ''}
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
           ${c.traced ? '<span class="pill amber">hand-corrected</span>' : ''}</td>
+      <td class="casenote"></td>
       <td class="row" style="gap:2px">
         <button class="quiet vsg" title="scroll the CT, with any segmentations drawn
           on it">view file</button>
@@ -825,6 +933,10 @@ async function project(name) {
         ${c.skipped ? '<button class="quiet unsk">put back</button>' : ''}
       </td>
     </tr>`);
+    editableText(tr.querySelector(".casenote"), {
+      value: c.note || "", placeholder: "Add a note", width: 220,
+      save: (v) => api("/api/project/note", {project: name, case: c.case, note: v}),
+    });
     const vsg = tr.querySelector(".vsg");
     if (vsg) vsg.onclick = () => nav("viewseg", name, c.case);
     const rev = tr.querySelector(".rev");
@@ -841,6 +953,16 @@ async function project(name) {
     tbl.querySelector("tbody").append(tr);
   }
   cases.append(tbl);
+  /* Fill the window rather than a guessed fraction of it: 52vh left the bottom half of
+     a tall monitor empty, and any constant here is wrong for a two-line description or
+     a project with an offline-cases warning. Measured instead. */
+  const fitCases = () => {
+    if (!document.body.contains(cases)) return removeEventListener("resize", fitCases);
+    cases.style.maxHeight =
+      Math.max(220, innerHeight - cases.getBoundingClientRect().top - 24) + "px";
+  };
+  fitCases();
+  addEventListener("resize", fitCases);
 
   /* Header checkbox drives the column, and follows it back: clearing one row should
      leave the header showing "some", not a lie in either direction. */
@@ -878,6 +1000,9 @@ async function project(name) {
   tally();
 
   const tl = document.getElementById("tl");
+  /* Held here rather than read off the boxes, because searching rebuilds the rows -
+     which used to throw away everything you had ticked. */
+  const chosenT = new Set();
   const draw = (filter) => {
     tl.innerHTML = "";
     const f = (filter || "").toLowerCase();
@@ -885,13 +1010,17 @@ async function project(name) {
       if (f && !task.name.toLowerCase().includes(f) &&
           !(task.blurb || "").toLowerCase().includes(f)) continue;
       tl.append($(`<label>
-        <input type="checkbox" class="task" value="${esc(task.name)}">
+        <input type="checkbox" class="task" value="${esc(task.name)}"
+          ${chosenT.has(task.name) ? "checked" : ""}>
         <span><span class="tname">${esc(task.name)}</span>
           ${task.licensed ? '<span class="pill amber">license</span>' : ''}
           ${doneTasks.has(task.name) ? '<span class="pill on">done</span>' : ''}
           <div class="tblurb">${esc(task.blurb || "")}</div></span></label>`));
     }
-    tl.querySelectorAll(".task").forEach(b => b.onchange = licCheck);
+    tl.querySelectorAll(".task").forEach(b => b.onchange = () => {
+      b.checked ? chosenT.add(b.value) : chosenT.delete(b.value);
+      licCheck();
+    });
   };
   draw("");
   document.getElementById("q").oninput = (e) => draw(e.target.value);
@@ -905,8 +1034,7 @@ async function project(name) {
   }
 
   function licCheck() {
-    const need = [...document.querySelectorAll(".task:checked")]
-      .map(i => i.value).filter(v => t.tasks.find(x => x.name === v && x.licensed));
+    const need = [...chosenT].filter(v => t.tasks.find(x => x.name === v && x.licensed));
     const box = document.getElementById("lic");
     box.innerHTML = "";
     /* Nothing to say when nothing is needed. TotalSegmentator keeps a licence once it
@@ -934,7 +1062,7 @@ async function project(name) {
     const btn = ev.currentTarget, undo = pending(btn, "Checking series…");
     const box = document.getElementById("runerr"); box.innerHTML = "";
     const cs = [...document.querySelectorAll(".ck:checked")].map(i => i.value);
-    const tasks = [...document.querySelectorAll(".task:checked")].map(i => i.value);
+    const tasks = [...chosenT];
     const anal = [...document.querySelectorAll(".anal:checked")].map(i => i.value);
     if (!cs.length) { undo(); box.append(err({message:"Tick at least one case."})); return; }
     if (!tasks.length && !anal.length) {
@@ -957,6 +1085,25 @@ async function project(name) {
       return series(name, job, plan, cs);
     } catch (e) { undo(); box.append(err(e)); }
   };
+
+  /* Back from a case, or from a run: the screen comes up where you left it. */
+  PNOW = name;
+  const was = PSTATE[name];
+  if (was) {
+    for (const b of view.querySelectorAll("#ptabs .tab"))
+      if (b.dataset.t === was.tab) b.click();
+    const keep = new Set(was.cases);
+    cks.forEach(c => { c.checked = keep.has(c.value); });
+    was.tasks.forEach(x => chosenT.add(x));
+    draw(was.find && document.getElementById("q").value || "");
+    for (const k of was.analyses) {
+      const el = al.querySelector(`.anal[value="${CSS.escape(k)}"]`);
+      if (el) el.checked = true;
+    }
+    if (was.find) { qc.value = was.find; filterCases(); } else { tally(); }
+    licCheck();
+    requestAnimationFrame(() => { cases.scrollTop = was.scroll; });
+  }
 
   const res = document.getElementById("results");
   /* One table, holding whatever you tick. Three buttons for three fixed shapes meant
@@ -1256,333 +1403,393 @@ function running(name, jobs) {
 }
 
 /* ------------------------------------------------------ series screen */
-/* `plan` is set when we got here on the way to segmenting: the run is held until every
-   case has a series, then continues by itself. `need` names the cases that blocked it. */
+/* A queue of the cases on the left, one case on the stage beside it. Choosing a series
+   is a comparison of pictures, so every candidate is shown as a picture and they are
+   all on screen together - the old screen put the preview behind a `view` link, which
+   meant you could only ever look at one at a time and never compare two.
+
+   Only the case on the stage loads previews. That is what makes showing them by
+   default affordable on a study of four hundred cases.
+
+   `plan` is set when we got here on the way to segmenting: the run is held until every
+   case has a series, then continues by itself. */
+let SERKEY = null;               /* the keyboard handler of the screen now showing */
+
 async function series(name, job, plan, cases) {
   stopPoll(); crumb.textContent = name + " · series";
+  document.body.classList.add("wide");   /* route() puts the reading column back */
   view.innerHTML = "";
   view.append($(`<div>
-    <h1>${plan ? "Checking the scans" : "Which series?"}</h1>
+    <h1 id="sh1">${plan ? "Checking the scans" : "Which series?"}</h1>
     <div id="snote"></div>
-    <div class="note amber" id="stally" style="display:none"></div>
-    <label class="ui meta" style="display:block;margin-bottom:4px">
-      <input type="checkbox" id="onlywait" style="margin-right:6px">
-      Only the ones that need a series chosen</label>
-    <div id="cs" style="max-height:52vh;overflow:auto;border:1px solid var(--line);
-      border-radius:10px;padding:10px 12px;background:var(--panel)"></div>
-    <div class="row" style="position:sticky;bottom:0;background:var(--bg);
-      padding:12px 0;margin-top:4px;border-top:1px solid var(--line)">
+    <div class="serwrap">
+      <aside class="serq">
+        <div class="qhead">
+          <div id="qtally">reading the scans…</div>
+          <label class="ui" style="display:flex;gap:7px;align-items:center;margin-top:7px">
+            <input type="checkbox" id="onlywait"> only the ones that need you</label>
+        </div>
+        <div id="qlist"></div>
+      </aside>
+      <section class="serstage" id="stage"></section>
+    </div>
+    <div class="row runbar">
       ${plan ? '<button id="go" disabled>Reading…</button>' : ""}
-      <button class="${plan ? "quiet" : ""}" id="doneb">Back to project</button>
-      </div></div>`));
-  document.getElementById("doneb").onclick = () => nav("project", name);
-  const snote = document.getElementById("snote");
-  const cs = document.getElementById("cs");
+      <button class="${plan ? "quiet" : "ghost"}" id="doneb">Back to project</button>
+      <span class="right meta">1&ndash;9 chooses &middot; S sets the case aside</span>
+    </div></div>`));
+  g("doneb").onclick = () => nav("project", name);
 
-  /* A placeholder per case up front, so a scan that takes a minute a case shows a list
-     filling in rather than an empty screen. */
-  const slots = {};
-  for (const c of (cases || [])) {
-    slots[c] = $(`<div class="card"><div class="row"><h3>${esc(c)}</h3>
-      <span class="meta"><span class="spin dark"></span>reading…</span></div></div>`);
-    cs.append(slots[c]);
-  }
-  if (!cases || !cases.length)
-    cs.append($(`<div class="meta"><span class="spin dark"></span>reading the scans…</div>`));
-
-  const unresolved = new Set();
-  const skipped = new Set();
-  const blockers = new Set();
-
-  /* Which cases the filtered list holds: null when the filter is off, otherwise the
-     set of cases it is showing. A case joins the moment it turns out to need an answer
-     - during the scan as well as after it - and keeps its place once it is answered.
-     Cards that vanish as they are dealt with move the row under the pointer, leave
-     nothing to look back at, and take away any chance to change your mind. Switching
-     the filter off and on builds the list again from whatever is still waiting.
-
-     What counts as waiting is `unresolved`, the same set the tally counts. Asking the
-     cards instead - each carrying its own flag - let the two drift apart, and a screen
-     saying three cases need a series while showing none of them is the result. */
-  const onlywait = document.getElementById("onlywait");
-  let shown = null;
-  function applyFilter() {
-    for (const [cse, el] of Object.entries(slots)) {
-      if (!el) continue;
-      if (shown && unresolved.has(cse)) shown.add(cse);
-      el.hidden = !!shown && !shown.has(cse);
-    }
-  }
-  onlywait.onchange = () => {
-    shown = onlywait.checked ? new Set() : null;
-    applyFilter();
-  };
-
-  function retest() {
-    const go = document.getElementById("go");
-    if (go) {
-      go.disabled = unresolved.size > 0;
-      go.textContent = unresolved.size
-        ? `${unresolved.size} case(s) still need a series`
-        : "Start segmenting";
-    }
-    const tally = document.getElementById("stally");
-    if (tally) {
-      tally.textContent = unresolved.size
-        ? `${unresolved.size} of ${Object.keys(slots).length} still need a series`
-        : "";
-      tally.style.display = unresolved.size ? "" : "none";
-    }
-    applyFilter();
-  }
+  const stage = g("stage"), qlist = g("qlist"), snote = g("snote");
+  const results = {};                   /* case -> what the scan found for it */
+  const rows = {};                      /* case -> its row in the queue */
+  const unresolved = new Set(), skipped = new Set(), blockers = new Set();
+  const notes = {};                     /* case -> whatever you wrote about it */
   /* What the scan chose by itself, per case, so going ahead can record those choices
      and the screen genuinely does not come back for the same cases. */
   const autoPick = {};
+  let at = null;                        /* the case on the stage */
+  let ww = 2500, wl = 480;              /* the window every tile is drawn in */
+
+  const needs = (r) => !!r &&
+    (r.error || r.decision === "manual" || r.decision === "none");
+  const order = () => Object.keys(rows);
+
+  /* ---------------------------------------------------------- the queue */
+  function qrow(cse) {
+    if (rows[cse]) return rows[cse];
+    const row = $(`<div class="qi pend"><span class="dot"></span>
+      <span class="nm">${esc(cse)}</span><span class="st">reading…</span></div>`);
+    row.onclick = () => showCase(cse);
+    rows[cse] = row; qlist.append(row);
+    return row;
+  }
+  for (const c of (cases || [])) qrow(c);
+
+  function paintRow(cse) {
+    const row = qrow(cse), r = results[cse];
+    row.className = "qi " + (!r ? "pend"
+                          : skipped.has(cse) ? "settled"
+                          : r.error ? "bad"
+                          : needs(r) ? "want" : "settled")
+                  + (cse === at ? " on" : "");
+    row.querySelector(".st").textContent =
+        !r ? "reading…"
+      : skipped.has(cse) ? "set aside"
+      : r.error ? "unreadable"
+      : r.decision === "none" ? "none found"
+      : needs(r) ? "needs you"
+      : r.chosen ? "series " + r.chosen.snum : "chosen";
+    /* A case never vanishes the moment it is answered - the row stays, greys off and
+       keeps its place, so you can go back and change your mind. The filter is the only
+       thing that hides one, and it is yours to switch off. */
+    row.hidden = g("onlywait").checked && !unresolved.has(cse) && cse !== at;
+  }
+
+  function retest() {
+    const go = g("go");
+    if (go) {
+      go.disabled = unresolved.size > 0;
+      go.textContent = unresolved.size
+        ? unresolved.size + " still need a series" : "Start segmenting";
+    }
+    const n = order().length;
+    g("qtally").textContent = unresolved.size
+      ? `${unresolved.size} of ${n} need you`
+      : `${n} case${n === 1 ? "" : "s"}, all settled`;
+    for (const c of order()) paintRow(c);
+  }
+  g("onlywait").onchange = retest;
+
+  /* ---------------------------------------------------------- the stage */
+  function showCase(cse) {
+    at = cse;
+    for (const c of order()) paintRow(c);
+    if (rows[cse]) rows[cse].scrollIntoView({block: "nearest"});
+    drawStage();
+  }
+
+  const BADGE = {cached: '<span class="pill on">chosen earlier</span>',
+                 picked: '<span class="pill on">chosen by you</span>',
+                 auto:   '<span class="pill on">picked automatically</span>',
+                 manual: '<span class="pill amber">needs you to choose</span>',
+                 none:   '<span class="pill warn">no series found</span>'};
+
+  function drawStage() {
+    stage.innerHTML = "";
+    if (!at) {
+      stage.append($(`<div class="meta"><span class="spin dark"></span>reading the
+        scans…</div>`));
+      return;
+    }
+    const r = results[at];
+    const head = $(`<div class="stagehead"><h2>${esc(at)}</h2>
+      <span>${(r && BADGE[r.decision]) || ""}</span>
+      <label class="ui meta" title="Leaves this case out of the run. Nothing is
+deleted and your series choice is kept; untick to bring it back."
+        ><input type="checkbox" id="skipck"> set aside</label></div>`);
+    stage.append(head);
+    const sk = head.querySelector("#skipck");
+    sk.checked = skipped.has(at);
+    sk.onchange = () => setAside(at, sk.checked);
+    /* Right where a case gets set aside, so the reason can be written down at the
+       moment it is decided rather than remembered later. */
+    const nbox = $(`<div class="meta" style="margin:-4px 0 2px"></div>`);
+    stage.append(nbox);
+    editableText(nbox, {
+      value: (results[at] && results[at].note) || notes[at] || "",
+      placeholder: "Add a note about this case", width: 460,
+      save: async (v) => { notes[at] = v;
+        await api("/api/project/note", {project: name, case: at, note: v}); },
+    });
+
+    if (!r) {
+      stage.append($(`<div class="meta"><span class="spin dark"></span>reading…</div>`));
+      return;
+    }
+    if (r.error) { stage.append($(`<div class="note warn">${esc(r.error)}</div>`)); return; }
+
+    if (r.quick) {
+      /* Answered from the recorded choice, so the series were never read - which is
+         what makes this fast on a study already worked through. */
+      const line = $(`<div class="row"><span class="meta">Answered earlier:
+        series ${esc(r.chosen ? r.chosen.snum : "?")} &mdash;
+        ${esc((r.chosen && r.chosen.desc) || "no description")}</span>
+        <button class="quiet" id="reread">read the series again</button></div>`);
+      line.querySelector("#reread").onclick = async (ev) => {
+        const undo = pending(ev.currentTarget, "Reading…");
+        try {
+          const {job: j} = await api("/api/scan",
+            {project: name, cases: [at], quick: false});
+          const st = await follow(j, () => {});
+          const fresh = (st.results || {})[at];
+          if (fresh) { take(at, fresh); retest(); drawStage(); } else undo();
+        } catch (e) { undo(); stage.append(err(e)); }
+      };
+      stage.append(line);
+      return;
+    }
+
+    if (!r.series || !r.series.length) {
+      stage.append($(`<div class="note warn">Nothing in this case's folder looks like a
+        usable series.</div>`));
+      return;
+    }
+
+    /* One window for every tile. Two scans shown in two different windows are not
+       being compared. */
+    const wbar = $(`<div class="row"><span class="meta">Window</span></div>`);
+    for (const [nm, v] of [["bone", [2500, 480]], ["soft tissue", [400, 50]],
+                           ["brain", [80, 40]]]) {
+      const b = $(`<button class="quiet">${esc(nm)}</button>`);
+      if (ww === v[0] && wl === v[1]) b.style.fontWeight = "700";
+      b.onclick = () => { ww = v[0]; wl = v[1]; drawStage(); };
+      wbar.append(b);
+    }
+    stage.append(wbar);
+
+    const box = $(`<div class="stiles"></div>`);
+    for (const s of r.series) box.append(tileFor(at, r, s));
+    stage.append(box);
+  }
+
+  function tileFor(cse, r, s) {
+    const on = r.chosen && String(r.chosen.snum) === String(s.snum);
+    const t = $(`<div class="stile${on ? " on" : ""}">
+      <div class="simg"><img alt=""><div class="sbusy">loading…</div></div>
+      <input type="range" class="ssl" min="0" max="0" value="0"
+             aria-label="Slice through series ${esc(s.snum)}">
+      <div class="sbody">
+        <div class="srow"><b class="ui">series ${esc(s.snum)}</b>
+          <span class="meta right mono slab"></span></div>
+        <dl class="sspec">
+          <dt>Thickness</dt><dd>${s.thickness == null ? "?" : esc(s.thickness) + " mm"}</dd>
+          <dt>Slices</dt><dd>${s.slices}</dd>
+          <dt>Kernel</dt><dd>${esc(s.kernel || "?")}</dd>
+          <dt>Plane</dt><dd>${s.axial ? "axial" : "other"}</dd>
+        </dl>
+        <div class="sdesc">${esc(s.desc || "(no description)")}</div>
+        <div class="reasons">${esc((s.reasons || []).join(", "))} &middot;
+          score ${esc(s.score)}</div>
+      </div>
+      <button class="suse">${on ? "Chosen" : "Use this one"}</button>
+      <div class="serr"></div></div>`);
+    t.querySelector(".suse").onclick = (ev) => choose(cse, s, ev.currentTarget, t);
+    wirePreview(t, cse, s);
+    return t;
+  }
+
+  /* Read straight off the DICOMs. Choosing a series is a question about what the images
+     look like, asked before anything has been converted, so looking cannot require a
+     conversion or write anything down. */
+  function wirePreview(t, cse, s) {
+    const im = t.querySelector("img"), sl = t.querySelector(".ssl");
+    const lab = t.querySelector(".slab"), busy = t.querySelector(".sbusy");
+    const base = "/api/series/preview.png?name=" + encodeURIComponent(name) +
+                 "&case=" + encodeURIComponent(cse) +
+                 "&path=" + encodeURIComponent(s.series_dir) +
+                 "&token=" + encodeURIComponent(TOKEN);
+    let want = 0, inflight = false;
+    /* One request in flight, latest wins - scrubbing then self-paces instead of
+       queueing a frame per pixel of slider travel. */
+    function show() {
+      if (inflight) return;
+      inflight = true;
+      const i = want, next = new Image();
+      next.onload = () => {
+        im.src = next.src; inflight = false;
+        busy.classList.add("hide");
+        lab.textContent = (i + 1) + " / " + (+sl.max + 1);
+        if (want !== i) show();
+      };
+      next.onerror = () => { inflight = false; busy.textContent = "cannot read that slice"; };
+      next.src = base + "&i=" + i + "&ww=" + ww + "&wl=" + wl;
+    }
+    sl.oninput = () => { want = +sl.value; show(); };
+    api("/api/series/info?name=" + encodeURIComponent(name) +
+        "&case=" + encodeURIComponent(cse) +
+        "&path=" + encodeURIComponent(s.series_dir))
+      .then(info => {
+        sl.max = Math.max(0, info.slices - 1);
+        sl.value = want = Math.floor(info.slices / 2);   /* mid-stack answers most of it */
+        show();
+      })
+      .catch(() => { busy.textContent = "cannot read this series"; });
+  }
+
+  /* ------------------------------------------------------- what you decide */
+  async function choose(cse, s, btn, t) {
+    const undo = pending(btn, "Saving…");
+    try {
+      const res = await api("/api/series/pick", {project: name, case: cse,
+        series_dir: s.series_dir, snum: s.snum, desc: s.desc});
+      const r = results[cse];
+      r.chosen = {snum: s.snum, desc: s.desc, series_dir: s.series_dir};
+      r.decision = "picked";
+      delete autoPick[cse];            /* your pick is already written */
+      unresolved.delete(cse);
+      retest();
+      if (res.cleared_nifti)
+        stage.append($(`<div class="note amber">The old image was removed, so this case
+          will be converted again.</div>`));
+      /* On to the next one that needs an answer - the queue is the point. */
+      const next = order().find(c => unresolved.has(c));
+      if (next && next !== cse) showCase(next); else drawStage();
+    } catch (e) { undo(); t.querySelector(".serr").append(err(e)); }
+  }
+
+  /* A case whose series cannot be told apart, or that has none worth using, would
+     otherwise hold up every other case in the run. Setting it aside is recorded on the
+     project, not on the scan, so it survives and so it can be undone. */
+  async function setAside(cse, on) {
+    on ? skipped.add(cse) : skipped.delete(cse);
+    if (on) unresolved.delete(cse);
+    else if (blockers.has(cse)) unresolved.add(cse);
+    retest();
+    try { await api("/api/project/skip", {project: name, case: cse, skip: on}); }
+    catch (e) { stage.append(err(e)); }
+  }
+
+  /* Recorded as each case comes back, not once the whole scan is over: the queue and
+     the tally both read this, and a list that fills in as the answers arrive is the
+     point of scanning case by case. */
+  function take(cse, r) {
+    results[cse] = r;
+    qrow(cse);
+    if (needs(r)) { blockers.add(cse); if (!skipped.has(cse)) unresolved.add(cse); }
+    else { blockers.delete(cse); unresolved.delete(cse); }
+    if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
+    /* Written as soon as it is worked out, not when the run starts: the reading is the
+       expensive part, and losing it because the page was closed means doing it again.
+       Reversible from the stage. */
+    if (r.decision === "auto" && r.chosen) {
+      delete autoPick[cse];
+      api("/api/series/pick", {project: name, case: cse, snum: r.chosen.snum,
+                               series_dir: r.chosen.series_dir, desc: r.chosen.desc})
+        .catch(() => { autoPick[cse] = r.chosen; });   // fall back to saving at launch
+    }
+  }
+
   async function launch(btn) {
     const undo = pending(btn, "Starting…");
     try {
       for (const [cse, chosen] of Object.entries(autoPick))
-        await api("/api/series/pick", {project:name, case:cse,
-          series_dir:chosen.series_dir, snum:chosen.snum, desc:chosen.desc});
+        await api("/api/series/pick", {project: name, case: cse,
+          series_dir: chosen.series_dir, snum: chosen.snum, desc: chosen.desc});
       const go = Object.assign({}, plan,
         {cases: plan.cases.filter(c => !skipped.has(c))});
       if (!go.cases.length) {
-        cs.append(err({message:"Every case is set aside, so there is nothing to run."}));
+        snote.append(err({message: "Every case is set aside, so there is nothing to run."}));
         if (undo) undo(); return;
       }
       const r = await api("/api/run", go);
       running(name, r.jobs);
-    } catch (e) { if (undo) undo(); cs.append(err(e)); }
+    } catch (e) { if (undo) undo(); snote.append(err(e)); }
   }
-  const go = document.getElementById("go");
-  if (go) go.onclick = (ev) => launch(ev.currentTarget);
+  if (g("go")) g("go").onclick = (ev) => launch(ev.currentTarget);
+
+  /* A queue is a keyboard job. The handler is replaced rather than stacked, and steps
+     down as soon as its screen is gone. */
+  if (SERKEY) removeEventListener("keydown", SERKEY);
+  SERKEY = (e) => {
+    if (!document.body.contains(stage)) { removeEventListener("keydown", SERKEY); return; }
+    if (e.target && e.target.matches && e.target.matches("input,textarea,select")) return;
+    if (/^[1-9]$/.test(e.key)) {
+      const b = stage.querySelectorAll(".stile .suse")[+e.key - 1];
+      if (b) { e.preventDefault(); b.click(); }
+    } else if (e.key === "s" || e.key === "S") {
+      const box = g("skipck");
+      if (box) { box.checked = !box.checked; box.onchange(); }
+    }
+  };
+  addEventListener("keydown", SERKEY);
 
   try {
     const pst = await api("/api/project?name=" + encodeURIComponent(name));
-    (pst.case_status || []).forEach(c => { if (c.skipped) skipped.add(c.case); });
-  } catch (e) { /* the cards still work; they just start unticked */ }
+    (pst.case_status || []).forEach(c => {
+      if (c.skipped) skipped.add(c.case);
+      if (c.note) notes[c.case] = c.note;
+    });
+  } catch (e) { /* the queue still works; cases just start un-set-aside */ }
 
-  let last = {};
+  drawStage();
   await follow(job, (s) => {
     if (!s.results) return;
-    last = s.results;
+    let redraw = false;
     for (const [cse, r] of Object.entries(s.results)) {
-      if (slots[cse] && slots[cse].dataset.done === "1") continue;
-      const card = render(cse, r);
-      if (slots[cse]) { slots[cse].replaceWith(card); slots[cse] = card; }
-      else { cs.append(card); slots[cse] = card; }
-      card.dataset.done = "1";
-      /* Recorded as each case comes back, not once the whole scan is over: the filter
-         and the tally both read this, and a list that fills in as the answers arrive
-         is the point of scanning case by case. */
-      if (r.error || r.decision === "manual" || r.decision === "none") {
-        blockers.add(cse);
-        if (!skipped.has(cse)) unresolved.add(cse);
-      }
-      /* Recorded as soon as it is worked out, not when the run starts: the reading is
-         the expensive part, and losing it because the page was closed means doing it
-         all again. Reversible from the card. */
-      if (r.decision === "auto" && r.chosen) {
-        delete autoPick[cse];
-        api("/api/series/pick", {project:name, case:cse, snum:r.chosen.snum,
-                                 series_dir:r.chosen.series_dir, desc:r.chosen.desc})
-          .catch(() => { autoPick[cse] = r.chosen; });   // fall back to saving at launch
-      }
+      if (results[cse]) continue;              /* the first answer for a case wins */
+      take(cse, r);
+      if (!at && needs(r)) { showCase(cse); redraw = false; }
+      else if (cse === at) redraw = true;
     }
     retest();
+    if (redraw) drawStage();                   /* only when it is this case's answer */
   });
 
-  /* Which cases still want an answer. Worked out whether or not a run is waiting on
-     this screen, because the ordering and the count are just as useful when you opened
-     it yourself to check. */
-  const blocking = Object.entries(last)
-    .filter(([, r]) => r.error || r.decision === "manual" || r.decision === "none")
-    .map(([c]) => c);
-  const unseen = Object.entries(last)
-    .filter(([, r]) => !r.error && r.decision === "auto").map(([c]) => c);
-  retest();          /* blockers and unresolved were filled in as results arrived */
+  const blocking = order().filter(c => needs(results[c]));
+  const unseen = order().filter(c => results[c] && !results[c].error &&
+                                     results[c].decision === "auto");
+  retest();
+  if (!at) showCase(blocking[0] || order()[0]);
 
-  if (!plan) return;
+  if (!plan) {
+    if (blocking.length) { g("onlywait").checked = true; retest(); }
+    return;
+  }
 
   if (!blocking.length && !unseen.length) {
     snote.append($(`<div class="note">Every case had a series already. Starting…</div>`));
-    return launch(document.getElementById("go"));
+    return launch(g("go"));
   }
-  document.querySelector("h1").textContent = "Which series?";
+  g("sh1").textContent = "Which series?";
+  if (blocking.length) { g("onlywait").checked = true; retest(); }
   snote.append($(blocking.length
-    ? `<div class="note amber">Segmenting is on hold: <b>${esc(blocking.join(", "))}</b>
-       ${blocking.length === 1 ? "has" : "have"} more than one equally plausible series,
-       so the choice is yours.</div>`
-    : `<div class="note">First time segmenting <b>${esc(unseen.join(", "))}</b>. These
-       were picked automatically — change any of them, or go ahead. You will not be
-       asked again.</div>`));
-
-  function render(cse, r) {
-    if (r.error) {
-      const bad = $(`<div class="card"><h3>${esc(cse)}</h3>
-        <div class="note warn">${esc(r.error)}</div></div>`);
-      return bad;
-    }
-    const badge = {cached:'<span class="pill on">already chosen</span>',
-                   auto:'<span class="pill on">picked automatically</span>',
-                   manual:'<span class="pill amber">needs you to choose</span>',
-                   none:'<span class="pill warn">no series found</span>'}[r.decision];
-    const card = $(`<div class="card"><div class="row">
-      <h3>${esc(cse)}</h3>${badge}
-      <label class="ui meta right" title="Leaves this case out. Nothing is deleted and
-your series choice is kept; untick to bring it back."><input
-        type="checkbox" class="skipck"> set aside</label></div>
-      <div style="display:flex;gap:14px;align-items:flex-start">
-        <div style="flex:1;min-width:0;overflow-x:auto">
-          <table><thead><tr><th></th><th>Series</th><th>Slices</th><th>Thickness</th>
-            <th>Kernel</th><th>Plane</th><th>Score</th><th>Description</th></tr></thead>
-          <tbody></tbody></table></div>
-        <div class="prevslot"></div>
-      </div></div>`);
-    if (plan && r.chosen && r.decision !== "cached") autoPick[cse] = r.chosen;
-    const tb = card.querySelector("tbody");
-    if (r.quick) {
-      /* Answered from the recorded choice, so the series were never read - which is
-         what makes this fast on a study already worked through. */
-      wireSkip(card, cse);
-      const line = $(`<div class="row"><span class="meta">series ${
-        esc(r.chosen ? r.chosen.snum : "?")} &mdash; ${
-        esc((r.chosen && r.chosen.desc) || "chosen earlier")}</span>
-        <button class="quiet reread">re-read the series</button></div>`);
-      line.querySelector(".reread").onclick = async (ev) => {
-        const undo = pending(ev.currentTarget, "Reading…");
-        try {
-          const {job} = await api("/api/scan",
-            {project:name, cases:[cse], quick:false});
-          const st = await follow(job, () => {});
-          const fresh = (st.results || {})[cse];
-          if (fresh) { const c2 = render(cse, fresh); card.replaceWith(c2);
-                       slots[cse] = c2; retest(); }
-          else undo();
-        } catch (e) { undo(); card.append(err(e)); }
-      };
-      card.append(line);
-      card.querySelector("table").remove();
-      return card;
-    }
-    for (const s of r.series) {
-      const chosen = r.chosen && String(r.chosen.snum) === String(s.snum);
-      const tr = $(`<tr class="${chosen ? "sel" : ""}">
-        <td class="row" style="gap:2px">
-          <button class="quiet pick">use</button>
-          <button class="quiet look">view</button></td>
-        <td>${esc(s.snum)}</td><td>${s.slices}</td>
-        <td>${s.thickness == null ? "?" : esc(s.thickness) + "mm"}</td>
-        <td class="mono">${esc(s.kernel || "?")}</td>
-        <td>${s.axial ? "axial" : "other"}</td>
-        <td><b>${s.score}</b></td>
-        <td>${esc(s.desc || "(none)")}
-          <div class="reasons">${esc((s.reasons||[]).join(", "))}</div></td></tr>`);
-      tr.querySelector(".pick").onclick = async (ev) => {
-        const undo = pending(ev.currentTarget, "Saving…");
-        try {
-          const res = await api("/api/series/pick", {project:name, case:cse,
-            series_dir:s.series_dir, snum:s.snum, desc:s.desc});
-          tb.querySelectorAll("tr").forEach(x => x.classList.remove("sel"));
-          tr.classList.add("sel");
-          card.querySelector(".pill").outerHTML =
-            '<span class="pill on">chosen by you</span>';
-          delete autoPick[cse];          /* the user's pick is already written */
-          unresolved.delete(cse); retest();
-          if (res.cleared_nifti)
-            card.append($(`<div class="note amber">The old image was removed, so this
-              case will be converted again.</div>`));
-        } catch (e) { card.append(err(e)); } finally { undo(); }
-      };
-      tr.querySelector(".look").onclick = () => preview(card, cse, s);
-      tb.append(tr);
-    }
-    /* A case whose series cannot be told apart, or that has none worth using, would
-       otherwise hold up every other case in the run. Setting it aside is recorded on
-       the project, not on the scan, so it survives and so it can be undone. */
-    wireSkip(card, cse);
-    return card;
-  }
-
-  /* Set aside settles the case as much as choosing a series does: it stops counting as
-     unfinished, and like a chosen one it stays where it is until the filter is reset. */
-  function wireSkip(card, cse) {
-    const sk = card.querySelector(".skipck");
-    if (!sk) return;
-    sk.checked = !!skipped.has(cse);
-    sk.onchange = async () => {
-      skipped[sk.checked ? "add" : "delete"](cse);
-      if (sk.checked) unresolved.delete(cse);
-      else if (blockers.has(cse)) unresolved.add(cse);
-      retest();
-      try { await api("/api/project/skip", {project:name, case:cse, skip:sk.checked}); }
-      catch (e) { card.append(err(e)); }
-    };
-  }
-
-  /* Read straight off the DICOMs. Choosing a series is a question about what the
-     images look like, asked before anything has been converted, so looking cannot
-     require a conversion or write anything down. */
-  function preview(card, cse, row) {
-    let box = card.querySelector(".prev");
-    if (box && box.dataset.snum === String(row.snum)) { box.remove(); return; }
-    if (box) box.remove();
-    /* Beside the table rather than under it: the point of looking is to compare the
-       picture with the row it belongs to. */
-    box = $(`<div class="prev" style="width:340px;flex:none">
-      <div style="margin-bottom:6px">
-        <b class="ui">series ${esc(row.snum)}</b>
-        <div class="meta">${esc(row.desc || "(no description)")}</div>
-        <div class="row" style="gap:4px;margin-top:4px" id="pw"></div></div>
-      <img class="pimg" style="width:100%;border:1px solid var(--line);
-        border-radius:6px;background:#000;image-rendering:pixelated">
-      <input type="range" class="psl" style="width:100%;margin:8px 0 2px"
-             min="0" max="0" value="0">
-      <div class="meta mono plab"></div></div>`);
-    box.dataset.snum = String(row.snum);
-    card.querySelector(".prevslot").append(box);
-
-    const im = box.querySelector(".pimg"), sl = box.querySelector(".psl");
-    const lab = box.querySelector(".plab");
-    let ww = 2500, wl = 480, want = 0, busy = false;
-    const base = "/api/series/preview.png?name=" + encodeURIComponent(name) +
-                 "&case=" + encodeURIComponent(cse) +
-                 "&path=" + encodeURIComponent(row.series_dir) +
-                 "&token=" + encodeURIComponent(TOKEN);
-
-    /* One request in flight, latest wins - scrubbing then self-paces instead of
-       queueing a frame per pixel of slider travel. */
-    function show() {
-      if (busy) return;
-      busy = true;
-      const i = want, next = new Image();
-      next.onload = () => {
-        im.src = next.src; busy = false;
-        lab.textContent = `slice ${i + 1} / ${+sl.max + 1} · W ${ww} L ${wl}`;
-        if (want !== i) show();
-      };
-      next.onerror = () => { busy = false; lab.textContent = "could not read that slice"; };
-      next.src = `${base}&i=${i}&ww=${ww}&wl=${wl}`;
-    }
-    sl.oninput = () => { want = +sl.value; show(); };
-
-    for (const [nm, v] of Object.entries({bone: [2500, 480], "soft tissue": [400, 50],
-                                          brain: [80, 40]})) {
-      const b = $(`<button class="quiet">${esc(nm)}</button>`);
-      b.onclick = () => { ww = v[0]; wl = v[1]; show(); };
-      box.querySelector("#pw").append(b);
-    }
-
-    api("/api/series/info?name=" + encodeURIComponent(name) +
-        "&case=" + encodeURIComponent(cse) +
-        "&path=" + encodeURIComponent(row.series_dir))
-      .then(info => {
-        sl.max = Math.max(0, info.slices - 1);
-        sl.value = want = Math.floor(info.slices / 2);
-        show();
-      })
-      .catch(e => box.append(err(e)));
-  }
+    ? `<div class="note amber">Segmenting is on hold: <b>${esc(blocking.length)}</b>
+       case${blocking.length === 1 ? " has" : "s have"} more than one equally plausible
+       series, so the choice is yours. They are the ones marked in the queue.</div>`
+    : `<div class="note">First time segmenting <b>${esc(unseen.length)}</b>
+       case${unseen.length === 1 ? "" : "s"}. These were picked automatically &mdash;
+       change any of them from the queue, or go ahead. You will not be asked again.</div>`));
 }
 
 /* -------------------------------------------------------- fossa review */
@@ -2137,20 +2344,29 @@ async function viewseg(name, cse, focus) {
   crumb.textContent = name + " · " + cse;
   view.innerHTML = "";
   view.append($(`<div>
-    <div class="row" style="margin-bottom:14px">
-      <h1 style="margin:0">Scan</h1>
+    <div class="row" style="margin-bottom:4px">
+      <h1 style="margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:26px"
+        >${esc(cse)}</h1>
       <span class="right"><button class="ghost" id="back">Back to project</button></span>
     </div>
+    <div class="meta" id="vnote" style="margin-bottom:12px"></div>
     <div id="vhead"></div>
     <div class="vwrap hide" id="vwrap">
       <aside class="vside">
-        <input type="search" id="vq" placeholder="Search structures">
-        <div class="row" style="gap:2px">
-          <button class="quiet" id="vall">show all</button>
-          <button class="quiet" id="vnone">hide all</button>
+        <div id="vsers">
+          <div class="vsh">Series in this case</div>
+          <div id="vserlist" class="vempty">reading&hellip;</div>
         </div>
-        <div class="vtree" id="vtree"></div>
-        <div id="vmlist"></div>
+        <div id="vstruct">
+          <input type="search" id="vq" placeholder="Search structures">
+          <div class="row" style="gap:2px">
+            <button class="quiet" id="vall">show all</button>
+            <button class="quiet" id="vnone">hide all</button>
+          </div>
+          <div class="vtree" id="vtree"></div>
+          <div id="vmlist"></div>
+        </div>
+        <div id="vraw" class="vempty" hidden>No structures on this series.</div>
       </aside>
       <section>
         <div class="row" style="margin:0 0 10px">
@@ -2176,16 +2392,32 @@ async function viewseg(name, cse, focus) {
     </div></div>`));
   g("back").onclick = () => nav("project", name);
 
-  let st;
+  /* The same note as the case list and the series stage, so whatever you noticed
+     while looking at the scan is written down where you noticed it. */
+  api("/api/project?name=" + encodeURIComponent(name))
+    .then(pst => {
+      const c = (pst.case_status || []).find(x => x.case === cse) || {};
+      editableText(g("vnote"), {
+        value: c.note || "", placeholder: "Add a note about this case", width: 460,
+        save: (v) => api("/api/project/note", {project: name, case: cse, note: v}),
+      });
+    })
+    .catch(() => {});
+
+  let st, rawOnly = false;
   try {
     st = await api("/api/view/case?name=" + encodeURIComponent(name) +
                    "&case=" + encodeURIComponent(cse));
   } catch (e) {
-    if (e.data && e.data.needs_convert) return offerConvert();
-    /* "RuntimeError: this case has not been converted yet" - the sentence after the
-       colon was written for whoever is reading it; the class name in front was not. */
-    g("vhead").append(err(new Error(String(e.message || e).replace(/^\w*Error: /, ""))));
-    return;
+    /* Nothing converted, or the pipeline could not decide which series to convert.
+       Neither stops you looking at the DICOMs, which is what someone opening a scan
+       came to do - so carry on with no volume behind us and no structures to draw.
+       "RuntimeError: ..." - the sentence after the colon was written for whoever is
+       reading it; the class name in front was not. */
+    rawOnly = true;
+    st = {presets: WINDOWS, default: "bone", planes: {}, layers: [],
+          warnings: [], stamp: 0, series: {}};
+    offerConvert();
   }
 
   /* A case whose DICOMs have never been converted has nothing to draw, but that is a
@@ -2194,8 +2426,8 @@ async function viewseg(name, cse, focus) {
   function offerConvert() {
     const box = $(`<div class="card">
       <div class="row">
-        <span>This case has not been converted from DICOM yet.</span>
-        <span class="right"><button id="cvt">Convert now</button></span>
+        <span>Not converted yet.</span>
+        <span class="right"><button id="cvt" disabled>Convert</button></span>
       </div>
       <div class="meta" id="cvtlog" style="margin-top:8px"></div></div>`);
     g("vhead").append(box);
@@ -2203,6 +2435,12 @@ async function viewseg(name, cse, focus) {
       const undo = pending(ev.currentTarget, "Converting…");
       const log = document.getElementById("cvtlog");
       try {
+        /* Whatever is selected on the left is the answer to the question the
+           conversion could not answer for itself. Recorded first, so the conversion
+           and every later run read the same choice. */
+        if (S.ser)
+          await api("/api/series/pick", {project: name, case: cse,
+            series_dir: S.ser.series_dir, snum: S.ser.snum, desc: S.ser.desc});
         const {job} = await api("/api/convert", {project: name, case: cse});
         const s = await follow(job, (t) => {
           log.textContent = (t.lines || []).slice(-1)[0] || t.step || "working…";
@@ -2216,13 +2454,21 @@ async function viewseg(name, cse, focus) {
       }
     };
   }
+  /* Which scan this actually is. The labels were computed from it, so it is the one
+     fact about the picture that is not in the picture. */
+  const sr = st.series || {};
+  g("vstruct").hidden = rawOnly;
+  g("vraw").hidden = !rawOnly;
   g("vwrap").classList.remove("hide");
   for (const w of st.warnings || []) g("vhead").append($(`<div class="note amber">${esc(w)}</div>`));
 
   const PL = ["axial", "coronal", "sagittal"];
   const S = {plane: "axial", mode: "2d", idx: {}, op: 45, op3: 100,
+             ser: null, ri: 0,        /* ser: a raw series, or null for the converted one */
              ww: st.presets[st.default][0], wl: st.presets[st.default][1]};
-  for (const p of PL) S.idx[p] = Math.floor(st.planes[p].n / 2);
+  /* no volume when nothing is converted, so there are no planes to start in the
+     middle of - the raw series brings its own slice count */
+  for (const p of PL) S.idx[p] = Math.floor((st.planes[p] || {n: 1}).n / 2);
 
   /* One bitset per task, indexed by the segment index the server sent. The same
      numbering is the DOM id, the colour table row and the URL, so nothing has to be
@@ -2310,6 +2556,56 @@ async function viewseg(name, cse, focus) {
   g("vall").onclick = () => setAll(true);
   g("vnone").onclick = () => setAll(false);
 
+  /* ---- the series of this case. Read in the background, because it costs a header
+     from every file and the viewer is already usable without it. */
+  const sers = g("vserlist");
+  function serRow(raw, meta, used) {
+    const row = $(`<div class="vsrow" title="${esc(meta.desc || "no description")}">
+      <span><span class="sn">${esc(meta.desc || "series " + meta.snum)}</span>
+        <div class="sm">series ${esc(meta.snum)} &middot; ${meta.slices} slices &middot; ${
+          meta.thickness == null ? "?" : esc(meta.thickness)} mm</div></span>
+      <span class="tag">${used ? "segmented" : ""}</span></div>`);
+    row.dataset.snum = String(meta.snum);
+    row.onclick = () => pickSeries(raw, meta);
+    return row;
+  }
+  function markSeries() {
+    const now = String(S.ser ? S.ser.snum : (sr.snum || ""));
+    for (const r of sers.querySelectorAll(".vsrow"))
+      r.classList.toggle("on", r.dataset.snum === now);
+  }
+  function pickSeries(raw, meta) {
+    S.ser = raw;                          /* null means the converted image */
+    if (raw) { S.plane = "axial"; S.mode = "2d"; S.ri = Math.floor(meta.slices / 2); }
+    g("vstruct").hidden = !!raw;
+    g("vraw").hidden = !raw;
+    const cvt = g("cvt");
+    if (cvt) {
+      cvt.disabled = !raw;
+      cvt.textContent = raw ? "Convert series " + meta.snum : "Convert";
+    }
+    svg.innerHTML = "";                   /* measurements belong to the segmented one */
+    markSeries();
+    paintChrome();
+    request();
+  }
+  (async () => {
+    try {
+      const {job} = await api("/api/scan",
+        {project: name, cases: [cse], quick: false, waiting: true});
+      const done = await follow(job, () => {});
+      const list = ((done.results || {})[cse] || {}).series || [];
+      if (!list.length) { sers.textContent = "only one series here"; return; }
+      sers.innerHTML = "";
+      for (const m of list) {
+        const used = !rawOnly && String(m.snum) === String(sr.snum || "");
+        sers.append(serRow(used ? null : m, m, used));
+      }
+      if (rawOnly) pickSeries(list[0], list[0]);   /* the best-scoring one, to start */
+      markSeries();
+    } catch (e) { sers.textContent = "could not read the series"; }
+  })();
+
   /* ---- plane and window buttons */
   const planeBtns = {}, preBtns = {};
   for (const p of PL) {
@@ -2330,8 +2626,36 @@ async function viewseg(name, cse, focus) {
     preBtns[k] = b; g("vpre").append(b);
   }
   function paintChrome() {
-    const gm = st.planes[S.plane];
     const sl = g("vsl");
+    if (rawOnly && !S.ser) {                 /* the list is still loading */
+      sl.classList.add("hide");
+      g("vlabel").textContent = "choose a series on the left";
+      return;
+    }
+    /* A raw series has no volume behind it, so there is nothing to reformat into a
+       coronal, a sagittal or a surface. */
+    for (const p of PL) planeBtns[p].disabled = !!S.ser && p !== "axial";
+    b3d.disabled = !has3d || !!S.ser;
+    if (S.ser) {
+      const n = Math.max(1, S.ser.slices);
+      S.ri = Math.min(Math.max(0, S.ri), n - 1);
+      sl.max = n - 1; sl.value = S.ri;
+      g("vimg").classList.remove("hide");
+      sl.classList.remove("hide");
+      g("vpre").classList.remove("hide");
+      if (cv3d) cv3d.classList.add("hide");
+      for (const p of PL) planeBtns[p].classList.toggle("ghost", p !== "axial");
+      b3d.classList.add("ghost");
+      for (const k of Object.keys(st.presets))
+        preBtns[k].classList.toggle("ghost", !(st.presets[k][0] === Math.round(S.ww)
+                                            && st.presets[k][1] === Math.round(S.wl)));
+      g("vop").parentElement.hidden = true;   /* nothing to lay over a raw slice */
+      g("vlabel").textContent = `slice ${S.ri + 1} / ${n} \u00b7 straight off the ` +
+        `DICOMs \u00b7 W ${Math.round(S.ww)} L ${Math.round(S.wl)}`;
+      return;
+    }
+    g("vop").parentElement.hidden = false;
+    const gm = st.planes[S.plane];
     sl.max = gm.n - 1; sl.value = S.idx[S.plane];
     const d3 = S.mode === "3d";
     b3d.classList.toggle("ghost", !d3);
@@ -2381,6 +2705,7 @@ async function viewseg(name, cse, focus) {
                             sagittal: st.zooms[0]}[pl || S.plane] || 1);
 
   function drawMeasures() {
+    if (S.ser) { svg.innerHTML = ""; return; }   /* they were measured on the other one */
     const P = st.planes[S.plane], at = S.idx[S.plane];
     const r = img.getBoundingClientRect(), sr = stage.getBoundingClientRect();
     /* the picture's own millimetres, which is how the server sends the points and how
@@ -2505,8 +2830,14 @@ async function viewseg(name, cse, focus) {
   window.addEventListener("resize", drawMeasures);
   let inflight = null, want = null, shown = "", busyT = null, dead = false;
 
-  const sliceURL = (i) =>
-    "/api/view/slice.png?name=" + encodeURIComponent(name) +
+  const sliceURL = (i) => S.ser
+    ? "/api/series/preview.png?name=" + encodeURIComponent(name) +
+      "&case=" + encodeURIComponent(cse) +
+      "&path=" + encodeURIComponent(S.ser.series_dir) +
+      "&i=" + (i === undefined ? S.ri : i) +
+      "&ww=" + Math.round(S.ww) + "&wl=" + Math.round(S.wl) +
+      "&token=" + encodeURIComponent(TOKEN)
+    : "/api/view/slice.png?name=" + encodeURIComponent(name) +
     "&case=" + encodeURIComponent(cse) + "&plane=" + S.plane +
     "&i=" + (i === undefined ? S.idx[S.plane] : i) +
     "&ww=" + Math.round(S.ww) + "&wl=" + Math.round(S.wl) + "&op=" + S.op +
@@ -2527,6 +2858,10 @@ async function viewseg(name, cse, focus) {
     else busy.classList.add("hide");
   }
   function sizeSlice() {
+    if (S.ser) {                 /* no millimetre geometry; let it fit the well */
+      img.classList.add("raw"); return;
+    }
+    img.classList.remove("raw");
     const gm = st.planes[S.plane], box = stage.getBoundingClientRect();
     /* One scale for both axes, from millimetres rather than pixels - that is what
        stops an anisotropic coronal from coming out squashed. */
@@ -2551,6 +2886,7 @@ async function viewseg(name, cse, focus) {
     im.src = url; showBusy(true);
   }
   function request() {
+    if (rawOnly && !S.ser) { paintChrome(); return; }
     if (S.mode === "3d") { paintChrome(); return request3d(); }
     const url = sliceURL();
     paintChrome();
@@ -2635,20 +2971,26 @@ async function viewseg(name, cse, focus) {
     if (S.mode === "3d") g("vlabel").textContent = label3d;
   }
 
+  /* Which slice, out of how many - a raw series brings its own count, a converted
+     volume gets it from the plane. Everything that moves through slices asks here. */
+  const nSlices = () => S.ser ? Math.max(1, S.ser.slices)
+                              : (st.planes[S.plane] || {n: 1}).n;
+  const atSlice = () => S.ser ? S.ri : S.idx[S.plane];
+  const goSlice = (v) => {
+    v = Math.max(0, Math.min(nSlices() - 1, v));
+    if (S.ser) S.ri = v; else S.idx[S.plane] = v;
+  };
+
   function preload() {
-    const n = st.planes[S.plane].n;
+    const n = nSlices(), i = atSlice();
     for (const d of [1, -1, 2, -2]) {
-      const j = S.idx[S.plane] + d;
+      const j = i + d;
       if (j >= 0 && j < n) new Image().src = sliceURL(j);
     }
   }
-  const step = (d) => {
-    const n = st.planes[S.plane].n;
-    S.idx[S.plane] = Math.max(0, Math.min(n - 1, S.idx[S.plane] + d));
-    request();
-  };
+  const step = (d) => { goSlice(atSlice() + d); request(); };
 
-  g("vsl").oninput = (e) => { S.idx[S.plane] = +e.target.value; request(); };
+  g("vsl").oninput = (e) => { goSlice(+e.target.value); request(); };
   g("vop").oninput = (e) => {
     const v = +e.target.value;
     if (S.mode === "3d") { S.op3 = v; } else { S.op = v; }
@@ -2668,9 +3010,9 @@ async function viewseg(name, cse, focus) {
     else if (k === "ArrowUp" || k === "ArrowLeft") step(-1);
     else if (k === "PageDown") step(10);
     else if (k === "PageUp") step(-10);
-    else if (k === "Home") { S.idx[S.plane] = 0; request(); }
-    else if (k === "End") { S.idx[S.plane] = st.planes[S.plane].n - 1; request(); }
-    else if ("123".includes(k)) { S.plane = PL[+k - 1]; paintChrome(); request(); }
+    else if (k === "Home") { goSlice(0); request(); }
+    else if (k === "End") { goSlice(nSlices() - 1); request(); }
+    else if ("123".includes(k) && !S.ser) { S.plane = PL[+k - 1]; paintChrome(); request(); }
     else return;
     e.preventDefault();
   };
