@@ -43,7 +43,7 @@ PROJECTS = APP / "projects"
 # Where the pipeline reads and writes, for this process and every child it starts.
 # Set before ct_paths is imported, because that is when it is read.
 os.environ["CT_DATA_ROOT"] = str(PROJECTS)
-from ct_paths import nifti_dir_for, seg_dir_for  # noqa: E402
+from ct_paths import is_dicom_file, nifti_dir_for, seg_dir_for  # noqa: E402
 PAGE_FILE = APP / "ct_gui_page.html"
 TOKEN = secrets.token_urlsafe(18)
 WIN = sys.platform == "win32"
@@ -274,16 +274,6 @@ ANALYSES = {
 
 
 # ------------------------------------------------------------------- dicom probing
-def is_dicom(path):
-    """The same preamble check segment_structures.is_dicom_file uses."""
-    try:
-        with open(path, "rb") as f:
-            f.seek(128)
-            return f.read(4) == b"DICM"
-    except Exception:
-        return False
-
-
 # DICOMDIR is a media index in DICOM format with no pixel data. It passes the preamble
 # check, so a folder holding only an index and some subfolders looks like a series
 # folder - which is how a study ends up registered one level too high.
@@ -292,7 +282,7 @@ INDEX_FILES = {"dicomdir"}
 
 def _image_file(f):
     return (f.is_file() and not f.name.startswith(".")
-            and f.name.lower() not in INDEX_FILES and is_dicom(str(f)))
+            and f.name.lower() not in INDEX_FILES and is_dicom_file(str(f)))
 
 
 def has_dicom_direct(d, limit=200):
@@ -772,11 +762,6 @@ def submit(job):
         JOB_ORDER.append(job.id)
     QUEUES[job.queue].put(job)
     return job
-
-
-def queue_depth(qname):
-    return sum(1 for j in JOBS.values()
-               if j.queue == qname and j.state in ("queued", "running"))
 
 
 # ------------------------------------------------------------------ job builders
@@ -2515,6 +2500,7 @@ def selftest():
     print(f"projects    : {PROJECTS}")
     # xmltodict is in here because TotalSegmentator imports it but does not require
     # it: without it a segmentation runs to the end and then writes no .seg.nrrd.
+    # Kept in step by hand with NEEDS_MODULES in find_python.sh and .bat.
     for mod in ("pydicom", "dicom2nifti", "nibabel", "numpy", "matplotlib", "nrrd",
                 "pandas", "xmltodict", "skimage", "totalsegmentator", "torch"):
         try:

@@ -13,6 +13,8 @@ rem TotalSegmentator but not dicom2nifti or pynrrd, so a narrower test would pic
 rem python that fails later, mid-run.
 
 set "HERE=%~dp0"
+rem Kept in step by hand with find_python.sh and the --selftest
+rem list in ct_gui.py.
 set "NEEDS_MODULES=totalsegmentator pydicom dicom2nifti nibabel numpy scipy matplotlib pandas nrrd xmltodict skimage"
 set "FOUND_PY="
 set "PARTIAL_PY="

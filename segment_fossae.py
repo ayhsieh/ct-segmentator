@@ -842,15 +842,7 @@ class MidsagittalCut:
         """(up, forward) millimetres back to a world point."""
         return self.origin + float(p[1]) * self.fwd + float(p[0]) * self.up
 
-    def scanned(self, p):
-        """Is this place inside the volume, rather than off the end of the scan?
 
-        Asked of the voxel grid and not of the Hounsfield numbers: air inside a head
-        reads the same as the nothing outside one, so a test on HU calls a nasal
-        airway unscanned."""
-        v = np.linalg.inv(self.affine)[:3, :3] @ self.world(p) \
-            + np.linalg.inv(self.affine)[:3, 3]
-        return bool(np.all((v >= 0) & (v <= np.array(self.shape, float) - 1)))
 
     def front_of_bone(self):
         """For each row, how far forward bone reaches. NaN where the row has none."""
@@ -858,7 +850,6 @@ class MidsagittalCut:
         rows = np.flatnonzero(self.bone.any(axis=1))
         out[rows] = self.mm([int(np.flatnonzero(r)[-1]) for r in self.bone[rows]])
         return out
-
 
 def find_nasion(cut, glabella, near=8.0, far=32.0, turn=1.5):
     """The notch in the front profile under glabella: the nasal root.

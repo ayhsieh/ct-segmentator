@@ -13,7 +13,8 @@ from collections import defaultdict
 
 # Defined in ct_paths so that a program which only reads results - produce_table, the
 # CSV builders - can find them without importing this module and, through it, torch.
-from ct_paths import (DATA_ROOT, group_dir, nifti_dir_for, seg_dir_for,  # noqa: F401
+from ct_paths import (DATA_ROOT, group_dir, is_dicom_file,  # noqa: F401
+                      nifti_dir_for, seg_dir_for,
                       anchored, unanchored, cache_get, cache_keys,
                       CACHE_FILE, load_cache, save_cache, resolve_from_cache)
 
@@ -115,16 +116,6 @@ def sanitize_filename(name):
     for ch in invalid:
         name = name.replace(ch, "_")
     return name.strip()
-
-
-def is_dicom_file(fpath):
-    """Quick check if a file is DICOM by reading its preamble (128 bytes + 'DICM')."""
-    try:
-        with open(fpath, "rb") as f:
-            f.seek(128)
-            return f.read(4) == b"DICM"
-    except Exception:
-        return False
 
 
 def get_series(dicom_folder):

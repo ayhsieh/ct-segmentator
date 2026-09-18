@@ -42,6 +42,20 @@ def unanchored(p):
     return p if p.is_absolute() else APP_ROOT / p
 
 
+def is_dicom_file(path):
+    """Is this a DICOM file? The preamble check: 128 bytes, then "DICM".
+
+    Here rather than in segment_structures because the interface needs it too, and
+    importing that module for six lines would pull dicom2nifti and nibabel with it.
+    """
+    try:
+        with open(path, "rb") as f:
+            f.seek(128)
+            return f.read(4) == b"DICM"
+    except Exception:
+        return False
+
+
 def group_dir(group):
     """Where a study group's folder lives.
 
