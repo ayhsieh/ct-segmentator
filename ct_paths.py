@@ -59,6 +59,17 @@ def group_dir(group):
     return under if under.exists() or not p.exists() else p
 
 
+def case_dir_for(group, case):
+    """Where a case's DICOM folder is.
+
+    A project made in the interface keeps its scans in `<group>/scans/<case>`; a group
+    made on the command line puts the case straight under the group. Both are honoured,
+    so a caller only has to know the group and the case name."""
+    root = group_dir(group)
+    under = root / "scans" / case
+    return under if under.is_dir() else root / case
+
+
 def nifti_dir_for(group):
     """Directory under `<group>/converted_nifti_<group>/` for a study group."""
     return group_dir(group) / f"converted_nifti_{group}"

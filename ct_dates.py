@@ -8,14 +8,12 @@ to reading the folder, and says so.
 Headers only, never pixel data, and pydicom rather than segment_structures so a CSV
 build does not load torch.
 """
-import json
 import os
 from collections import Counter
 from pathlib import Path
 
-from ct_paths import group_dir
+from ct_paths import cache_get, case_dir_for, load_cache, unanchored
 
-CACHE_FILE = Path(".series_selection_cache.json")
 DATE_TAGS = ["StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate"]
 
 
@@ -34,33 +32,27 @@ def _date_of(ds):
 
 
 def _recorded_series(case_dir):
-    """The folder of the series that was chosen for this case, if one was."""
-    if not CACHE_FILE.exists():
+    """The folder of the series that was chosen for this case, if one was.
+
+    Through ct_paths, because a choice is recorded under a path anchored to this
+    checkout and reading the file here meant only absolute keys ever matched - so a
+    case that had been answered still came back as never answered.
+    """
+    entry = cache_get(load_cache(), case_dir)
+    if not isinstance(entry, dict) or not entry.get("series_dir"):
         return None
-    try:
-        cache = json.loads(CACHE_FILE.read_text())
-    except Exception:
-        return None
-    for key in (str(case_dir.resolve()), str(case_dir)):
-        entry = cache.get(key)
-        if not entry:
-            continue
-        d = Path(entry.get("series_dir", ""))
-        if not d.is_absolute():
-            d = case_dir / d
-        if d.is_dir():
-            return d
-    return None
+    d = unanchored(entry["series_dir"])
+    return d if d.is_dir() else None
 
 
 def study_date(group, case, limit=400, case_dir=None):
     """(date, note). The note is empty when the date came from the chosen series.
 
-    case_dir is for callers that already know where the case is - the server holds its
-    projects outside DATA_ROOT, so group_dir would look in the wrong place.
+    case_dir is for callers that already know where the case is; everyone else gets
+    the folder worked out from the group and the case name.
     """
     import pydicom
-    case_dir = Path(case_dir) if case_dir else group_dir(group) / case
+    case_dir = Path(case_dir) if case_dir else case_dir_for(group, case)
     if not case_dir.exists():
         return "", "case folder not found"
 
