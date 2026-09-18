@@ -19,6 +19,7 @@ from ct_paths import (DATA_ROOT, group_dir, nifti_dir_for, seg_dir_for,  # noqa:
 
 import pydicom
 import dicom2nifti
+import dicom2nifti.convert_dicom
 import dicom2nifti.settings as dicom2nifti_settings
 import nibabel as nib
 import numpy as np
@@ -270,6 +271,66 @@ def resolve_folders(folder):
 # Series selection helpers
 # ---------------------------------------------------------------------------
 
+def one_reconstruction(files):
+    """The thinnest reconstruction, when a folder holds more than one of the same scan.
+
+    Some scanners write two reconstructions of one acquisition under a single series -
+    a 2 mm set and a 6 mm set over the same range. They are one series by every tag the
+    scan groups on, so both end up in the chosen folder, and a converter handed both
+    sees a volume that changes slice spacing halfway down.
+
+    Thin is what the measurements want and what the series scorer already prefers, so
+    the coarser copy is dropped. Returns `files` untouched when there is only one.
+    """
+    by_thickness = defaultdict(list)
+    for f in files:
+        try:
+            ds = pydicom.dcmread(f, stop_before_pixels=True,
+                                 specific_tags=["SliceThickness"])
+            t = round(float(ds.SliceThickness), 3)
+        except Exception:
+            t = None
+        by_thickness[t].append(f)
+    if len(by_thickness) < 2:
+        return files
+    real = [t for t in by_thickness if t]
+    keep = min(real) if real else None
+    dropped = sum(len(v) for t, v in by_thickness.items() if t != keep)
+    print(f"  This folder holds more than one reconstruction: "
+          f"{ {t: len(v) for t, v in by_thickness.items()} }. "
+          f"Converting the {keep} mm one, leaving {dropped} slice(s).")
+    return by_thickness[keep]
+
+
+def why_convert_failed(series_dir, exc, limit=300):
+    """A sentence naming what is actually in the folder the conversion was handed.
+
+    dicom2nifti reports MISSING_DICOM_FILES whether the folder is missing, empty, full
+    of files it cannot read, or merely not to its taste - and the four want different
+    things done about them.
+    """
+    d = Path(series_dir)
+    if not d.is_dir():
+        return f"the chosen series folder is not there any more: {d}"
+    here = [f for f in sorted(d.iterdir()) if f.is_file()]
+    if not here:
+        return f"the chosen series folder is empty: {d}"
+    readable = 0
+    for f in here[:limit]:
+        try:
+            pydicom.dcmread(str(f), stop_before_pixels=True,
+                            specific_tags=["SOPClassUID"])
+            readable += 1
+        except Exception:
+            pass
+    looked = min(len(here), limit)
+    if not readable:
+        return (f"{len(here)} file(s) in {d}, and none of the {looked} checked are "
+                f"readable as DICOM - is this the right folder?")
+    return (f"{len(here)} file(s) in {d}, {readable} of the {looked} checked read as "
+            f"DICOM, but dicom2nifti would not convert them: {exc}")
+
+
 def get_series_metadata(files):
     """Read DICOM metadata from a representative file in the series.
     Returns a dict with keys useful for scoring."""
@@ -284,7 +345,12 @@ def get_series_metadata(files):
     except Exception:
         pass
 
-    kernel = str(getattr(ds, "ConvolutionKernel", "")).lower()
+    # Multi-valued in DICOM (VR SH, VM 1-n). str() on pydicom's MultiValue prints a
+    # Python list, so a perfectly ordinary scan reached the screen as "['j30s', '2']".
+    k = getattr(ds, "ConvolutionKernel", "") or ""
+    if isinstance(k, (list, pydicom.multival.MultiValue)):
+        k = " ".join(str(x) for x in k)
+    kernel = str(k).lower()
 
     is_axial = False
     try:
@@ -923,6 +989,7 @@ def main():
             print(f"Tasks: {', '.join(tasks_to_run)}")
             print(f"{'=' * 60}")
 
+            files = one_reconstruction(files)
             series_dir = str(Path(files[0]).parent)
 
             # --- Convert DICOM to NIfTI (once per study) ---
@@ -936,7 +1003,15 @@ def main():
 
             if not nifti_path.exists():
                 print(f"\nConverting: '{desc or '(no description)'}' -> {nifti_path}")
-                dicom2nifti.dicom_series_to_nifti(series_dir, str(nifti_path))
+                try:
+                    # The files we chose, not everything that happens to share their
+                    # folder - the directory call re-reads the lot and has no way to
+                    # be told which of them the choice was about.
+                    slices = [pydicom.dcmread(f, force=True) for f in files]
+                    dicom2nifti.convert_dicom.dicom_array_to_nifti(
+                        slices, str(nifti_path), reorient_nifti=True)
+                except Exception as e:
+                    raise RuntimeError(why_convert_failed(series_dir, e)) from e
                 print("Conversion done.")
             else:
                 print(f"\nUsing existing NIfTI: {nifti_path}")
