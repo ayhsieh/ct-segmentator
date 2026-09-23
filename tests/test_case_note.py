@@ -6,7 +6,7 @@ to be removed, or a project collects a key for every case anyone ever clicked on
 
     python -m tests.test_case_note
 """
-from ct_gui import set_note
+from ctseg.ct_gui import set_note
 
 pr = {"name": "demo", "cases": [{"case": "A"}, {"case": "B"}]}
 

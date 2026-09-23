@@ -14,8 +14,8 @@ plus the series number/name and slice count read from the converted NIfTI. Nothi
 recomputed - this only reads what has already been written, so it is safe to run any
 time, and it is the only thing that writes a table.
 
-    python produce_table.py --group fossa
-    python produce_table.py --group fossa --out fossa_structure_volumes_ml.csv
+    python -m ctseg.produce_table --group fossa
+    python -m ctseg.produce_table --group fossa --out fossa_structure_volumes_ml.csv
 
 --select takes a JSON file naming what to keep: {"task": ["structure", ...]}, where an
 empty list means the whole task, and "_scan" covers the series and slice-count columns.
@@ -31,8 +31,8 @@ import json
 import os
 import pathlib
 
-from ct_dates import study_date
-from ct_paths import group_dir, seg_dir_for, nifti_dir_for
+from ctseg.ct_dates import study_date
+from ctseg.ct_paths import group_dir, seg_dir_for, nifti_dir_for
 
 
 def _project(group):
@@ -175,7 +175,7 @@ def main():
     cases = listed + [c for c in done if c not in set(listed)]
     if not cases:
         raise SystemExit(f"no cases for {args.group}: neither {total_dir} nor a "
-                         "project.json lists any. Run segment_structures.py first.")
+                         "project.json lists any. Run python -m ctseg.segment_structures first.")
     rows = {case: {} for case in cases}
 
     aside = set_aside(args.group)

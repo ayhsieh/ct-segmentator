@@ -12,7 +12,7 @@ import os
 from collections import Counter
 from pathlib import Path
 
-from ct_paths import cache_get, case_dir_for, load_cache, unanchored
+from ctseg.ct_paths import cache_get, case_dir_for, load_cache, unanchored
 
 DATE_TAGS = ["StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate"]
 

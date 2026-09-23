@@ -15,7 +15,7 @@ import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from segment_structures import one_reconstruction
+from ctseg.segment_structures import one_reconstruction
 
 
 def slice_at(path, thickness):

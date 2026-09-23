@@ -31,8 +31,8 @@ The preprocessing (adaptive bone threshold, convex-hull masking, resample+normal
 is vendored from the upstream DataProcessing.py, minus its vtk/torchio dependencies.
 
 Usage:
-    python label_cranial_bones.py --group fossa                 # all cases
-    python label_cranial_bones.py --group fossa --case CASE_A
+    python -m ctseg.label_cranial_bones --group fossa                 # all cases
+    python -m ctseg.label_cranial_bones --group fossa --case CASE_A
 """
 import os
 import sys
@@ -48,10 +48,10 @@ import torch
 from scipy.spatial import ConvexHull, Delaunay
 from skimage import measure
 
-from ct_paths import seg_dir_for
-from segment_structures import find_source_nifti, multilabel_to_segnrrd
+from ctseg.ct_paths import seg_dir_for
+from ctseg.segment_structures import find_source_nifti, multilabel_to_segnrrd
 
-MODEL_PATH = Path(__file__).parent / "cranial_ct_processing" / "Model.dat"
+MODEL_PATH = Path(__file__).resolve().parent.parent / "cranial_ct_processing" / "Model.dat"
 
 BONE_LABELS = ["frontal_left", "frontal_right", "parietal_left", "parietal_right",
                "occipital"]

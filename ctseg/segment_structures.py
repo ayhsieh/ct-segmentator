@@ -13,7 +13,7 @@ from collections import defaultdict
 
 # Defined in ct_paths so that a program which only reads results - produce_table, the
 # CSV builders - can find them without importing this module and, through it, torch.
-from ct_paths import (DATA_ROOT, group_dir, is_dicom_file,  # noqa: F401
+from ctseg.ct_paths import (DATA_ROOT, group_dir, is_dicom_file,  # noqa: F401
                       nifti_dir_for, seg_dir_for,
                       anchored, unanchored, cache_get, cache_keys,
                       CACHE_FILE, load_cache, save_cache, resolve_from_cache)
@@ -904,7 +904,7 @@ def main():
     parser.add_argument("--group-name", default=None,
                         help="Override the group name used for output paths. Lets a single "
                              "study folder be processed into its group's output tree, e.g. "
-                             "`segment_structures.py fossa/CASE1 --group-name fossa` writes to "
+                             "`python -m ctseg.segment_structures fossa/CASE1 --group-name fossa` writes to "
                              "fossa/total_segmentor_results_fossa/CASE1 instead of treating "
                              "CASE1 as its own group.")
     parser.add_argument("--stats-only", action="store_true",

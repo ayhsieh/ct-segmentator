@@ -13,7 +13,7 @@ import json
 import os
 from pathlib import Path
 
-APP_ROOT = Path(__file__).resolve().parent
+APP_ROOT = Path(__file__).resolve().parent.parent   # the top folder, not the package
 DATA_ROOT = Path(os.environ.get("CT_DATA_ROOT", "ct_scans"))
 
 

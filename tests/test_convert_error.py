@@ -14,7 +14,7 @@ import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from segment_structures import why_convert_failed
+from ctseg.segment_structures import why_convert_failed
 
 
 def dicom(path):

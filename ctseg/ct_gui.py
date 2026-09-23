@@ -7,16 +7,16 @@ they can be driven from a browser: pick a folder of DICOMs, choose what to segme
 watch it run, download a CSV. Nothing leaves the machine - the server binds the
 loopback interface only and every request carries a token minted at startup.
 
-    python ct_gui.py                 # then open the URL it prints
-    python ct_gui.py --open          # and open the browser for you
+    python -m ctseg.ct_gui                 # then open the URL it prints
+    python -m ctseg.ct_gui --open          # and open the browser for you
 
 Your DICOMs are never copied. A project registers the folder in place, and everything
 generated - converted NIfTI, segmentations, CSVs - lands under projects/ next to this
 file.
 
 Two extra modes exist for the server's own use, not for you:
-    python ct_gui.py --scan PATH     # score the DICOM series in PATH, print JSON
-    python ct_gui.py --selftest      # report interpreter, packages, GPU
+    python -m ctseg.ct_gui --scan PATH     # score the DICOM series in PATH, print JSON
+    python -m ctseg.ct_gui --selftest      # report interpreter, packages, GPU
 """
 import argparse
 import ast
@@ -38,13 +38,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, quote
 
-APP = Path(__file__).resolve().parent
+# The package sits one folder down; projects, logs and the cache stay at the top.
+HERE = Path(__file__).resolve().parent
+APP = HERE.parent
 PROJECTS = APP / "projects"
 # Where the pipeline reads and writes, for this process and every child it starts.
 # Set before ct_paths is imported, because that is when it is read.
 os.environ["CT_DATA_ROOT"] = str(PROJECTS)
-from ct_paths import is_dicom_file, nifti_dir_for, seg_dir_for  # noqa: E402
-PAGE_FILE = APP / "ct_gui_page.html"
+from ctseg.ct_paths import is_dicom_file, nifti_dir_for, seg_dir_for  # noqa: E402
+PAGE_FILE = HERE / "ct_gui_page.html"
 TOKEN = secrets.token_urlsafe(18)
 WIN = sys.platform == "win32"
 
@@ -67,10 +69,10 @@ def _literal(path, *names):
     return out
 
 
-_T = _literal(APP / "segment_structures.py", "AVAILABLE_TASKS", "LICENSED_TASKS")
+_T = _literal(HERE / "segment_structures.py", "AVAILABLE_TASKS", "LICENSED_TASKS")
 AVAILABLE_TASKS = _T.get("AVAILABLE_TASKS", [])
 LICENSED_TASKS = _T.get("LICENSED_TASKS", [])
-FBIN_MM = _literal(APP / "segment_fossae.py", "FBIN_MM").get("FBIN_MM", 1.5)
+FBIN_MM = _literal(HERE / "segment_fossae.py", "FBIN_MM").get("FBIN_MM", 1.5)
 
 # One-line descriptions so the list means something to someone who has not read the
 # TotalSegmentator paper. Anything unlisted still appears, just without a blurb.
@@ -252,14 +254,14 @@ ANALYSES = {
     "fossae": {
         "label": "Cranial fossa volumes",
         "blurb": "anterior / middle / posterior compartments from the skull-floor map",
-        "script": "segment_fossae.py",
+        "script": "ctseg.segment_fossae",
         "needs": ["brain_structures"],
         "proofs": ["*fossae_simple.stats.json"],
     },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
-        "script": "brain_icv.py",
+        "script": "ctseg.brain_icv",
         "needs": ["brain_structures"],
         "proofs": ["brain_icv.stats.json"],
     },
@@ -775,7 +777,7 @@ def job_segment(project, cases, tasks, device, license_no, force):
     steps = []
     for case in cases:
         for task in tasks:
-            argv = PY + ["segment_structures.py", str(case_dir(project, case)),
+            argv = PY + ["-m", "ctseg.segment_structures", str(case_dir(project, case)),
                          "--group-name", project, "--task", task,
                          "--skip-planning", "--device", device]
             if force:
@@ -835,7 +837,7 @@ def job_analysis(project, kind, cases, device, license_no="", force=False):
     spec = ANALYSES[kind]
     steps = []
     for case, task, extra in prereq_steps(project, cases):
-        argv = PY + ["segment_structures.py", str(case_dir(project, case)),
+        argv = PY + ["-m", "ctseg.segment_structures", str(case_dir(project, case)),
                      "--group-name", project, "--task", task,
                      "--skip-planning", "--device", device] + extra
         if license_no and task in LICENSED_TASKS:
@@ -844,7 +846,7 @@ def job_analysis(project, kind, cases, device, license_no="", force=False):
     for case in cases:
         if not force and has_output(project, case, spec["proofs"]):
             continue
-        argv = PY + [spec["script"], "--group", project, "--case", case,
+        argv = PY + ["-m", spec["script"], "--group", project, "--case", case,
                      "--device", device] + list(spec.get("args", ()))
         if kind == "brain_icv":
             argv.append("--no-segment")
@@ -856,7 +858,7 @@ def job_table(project, select=None):
     """The one table. produce_table.py reads every stats file the pipeline has written
     and nothing else - no segmenting, whatever is missing simply has no column."""
     out = seg_dir_for(project) / f"{project}_volumes_ml.csv"
-    argv = PY + ["produce_table.py", "--group", project, "--out", str(out)]
+    argv = PY + ["-m", "ctseg.produce_table", "--group", project, "--out", str(out)]
     if select:
         # via a file rather than the command line: a whole-body task alone is over a
         # hundred structures, and that argv would not survive the trip
@@ -879,7 +881,7 @@ def table_columns(project):
 
     Read through produce_table's own reader, so the list offered here and the columns
     that come out cannot disagree about what a stats file contains."""
-    from produce_table import read_stats, stats_files   # light: pandas is lazy there
+    from ctseg.produce_table import read_stats, stats_files   # light: pandas is lazy there
     tasks = {}
     root = seg_dir_for(project)
     cases = [d for d in root.iterdir() if d.is_dir()] if root.is_dir() else []
@@ -912,7 +914,7 @@ def job_scan(project, cases, quick=False, waiting=False):
         a project of any size was most of the wait."""
         # --quick before --scan: --scan takes the rest of the line, so a flag after it
         # is read as a path
-        argv = PY + ["ct_gui.py"] + (["--quick"] if quick else []) + ["--scan"]
+        argv = PY + ["-m", "ctseg.ct_gui"] + (["--quick"] if quick else []) + ["--scan"]
         # The folders go down stdin, not on the command line. Windows caps a command
         # line at about 32,000 characters, and a project of a few hundred cases at a
         # hundred characters of absolute path each goes straight past it - the whole
@@ -1071,7 +1073,7 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
 # --------------------------------------------------------------- series selection
 # Read from the pipeline rather than restated here, so the interface can never
 # auto-select on a threshold the command line has since moved.
-_A = _literal(APP / "segment_structures.py",
+_A = _literal(HERE / "segment_structures.py",
               "AUTO_SELECT_MIN_SCORE", "AUTO_SELECT_MIN_GAP")
 AUTO_MIN_SCORE = _A.get("AUTO_SELECT_MIN_SCORE", 20)
 AUTO_MIN_GAP = _A.get("AUTO_SELECT_MIN_GAP", 15)
@@ -1083,7 +1085,7 @@ def scan_folder(path, quick=False):
     # ct_paths, not segment_structures: answering from a recorded choice needs no
     # scoring, and importing the pipeline would load torch - seconds, and a few hundred
     # megabytes of CUDA DLLs that Windows can refuse outright when commit is short.
-    from ct_paths import load_cache, cache_get, resolve_from_cache
+    from ctseg.ct_paths import load_cache, cache_get, resolve_from_cache
     path = Path(path)
     key = str(path.resolve())
     entry = cache_get(load_cache(), path)
@@ -1100,7 +1102,7 @@ def scan_folder(path, quick=False):
         return {"path": str(path), "key": key, "decision": "cached", "chosen": cached,
                 "series": [], "quick": True}
 
-    from segment_structures import get_series, get_series_metadata, score_series
+    from ctseg.segment_structures import get_series, get_series_metadata, score_series
     series_map, _ = get_series(path)
     rows = []
     for uid, flist in series_map.items():
@@ -1137,8 +1139,8 @@ def convert_case(group, case):
     finds this file and reuses it rather than converting a second, differently named
     copy.
     """
-    from ct_paths import load_cache, cache_get, resolve_from_cache
-    from segment_structures import (get_series, get_series_metadata, score_series,
+    from ctseg.ct_paths import load_cache, cache_get, resolve_from_cache
+    from ctseg.segment_structures import (get_series, get_series_metadata, score_series,
                                     sanitize_filename)
     import dicom2nifti
     link = case_dir(group, case)
@@ -1184,7 +1186,7 @@ def job_convert(project, cases):
     """Convert without segmenting, so a scan can be looked at before anything is run."""
     def make(case):
         def run(job):
-            argv = PY + ["ct_gui.py", "--convert", project, case]
+            argv = PY + ["-m", "ctseg.ct_gui", "--convert", project, case]
             r = subprocess.run(argv, cwd=str(APP), env=child_env(), capture_output=True,
                                text=True, stdin=subprocess.DEVNULL, errors="replace")
             if r.returncode != 0:
@@ -1206,7 +1208,7 @@ def write_pick(link_path, series_dir, snum, desc):
     depends on how it got there. Paths inside this checkout are recorded relative to it,
     so moving or copying the whole folder keeps every choice.
     """
-    from ct_paths import (load_cache, cache_get, cache_keys, anchored, unanchored,
+    from ctseg.ct_paths import (load_cache, cache_get, cache_keys, anchored, unanchored,
                           CACHE_FILE)
     link = Path(link_path)
     entry = {"snum": str(snum), "desc": desc,
@@ -1661,7 +1663,7 @@ def measurement_lines(group, case, shape, zooms, aff):
     only to draw a line.
     """
     import numpy as np
-    from produce_table import stats_files
+    from ctseg.produce_table import stats_files
     d = seg_dir_for(group) / case
     stats = None
     for f in stats_files(d):
@@ -2087,7 +2089,7 @@ def job_fossa_apply(project, case, edits):
             tp.unlink()
             job.emit("dropped the saved correction")
 
-    argv = PY + ["segment_fossae.py", "--group", project, "--case", case]
+    argv = PY + ["-m", "ctseg.segment_fossae", "--group", project, "--case", case]
     return Job("fossa_apply", project, f"{case}: apply",
                [("saving the trace", write), (f"{case} - refit", argv)])
 

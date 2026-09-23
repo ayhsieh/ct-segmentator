@@ -96,7 +96,7 @@ just TotalSegmentator — 3D Slicer's bundled Python has TotalSegmentator but no
 the one they found that was closest. Any Python with the full set works directly:
 
 ```bash
-python ct_gui.py --open
+python -m ctseg.ct_gui --open
 ```
 
 ---
@@ -151,18 +151,30 @@ later runs; **Drop corrections** undoes them.
 The browser tool is a front end for four scripts, which still work on their own:
 
 ```bash
-python segment_structures.py --group STUDY --task brain_structures
-python segment_fossae.py --group STUDY
-python brain_icv.py --group STUDY
-python produce_table.py --group STUDY
+python -m ctseg.segment_structures --group STUDY --task brain_structures
+python -m ctseg.segment_fossae --group STUDY
+python -m ctseg.brain_icv --group STUDY
+python -m ctseg.produce_table --group STUDY
 ```
 
-These look for study folders under `ct_scans/`; set `CT_DATA_ROOT` to keep scans
-elsewhere. `python ct_gui.py --selftest` reports what is installed.
+Run them from this folder. They look for study folders under `ct_scans/`; set `CT_DATA_ROOT` to keep scans
+elsewhere. `python -m ctseg.ct_gui --selftest` reports what is installed.
 
 ## Layout
 
-| Where | What |
+```
+start.bat, start.command     double-click to open the tool
+install.command              first-time setup on a Mac
+ctseg/                       the code
+launcher/                    how the start files find a Python that has everything
+tests/                       one check per behaviour; python -m tests runs them all
+samples/                     tiny fixtures the tests build on
+scripts/                     one-off scripts, kept locally and not in git
+```
+
+Inside `ctseg/`:
+
+| File | What it does |
 |---|---|
 | `ct_gui.py`, `ct_gui_page.html` | the browser tool |
 | `segment_structures.py` | DICOM to NIfTI, then TotalSegmentator or DentalSegmentator |
@@ -170,10 +182,6 @@ elsewhere. `python ct_gui.py --selftest` reports what is installed.
 | `produce_table.py` | one CSV per project from every result on disk |
 | `markups_to_points.py` | hand-placed Slicer landmarks into the CSV the measurements read |
 | `ct_paths.py`, `ct_dates.py`, `label_cranial_bones.py` | shared by the scripts above |
-| `start.*`, `install.command`, `find_python.*`, `check_env.py` | launchers |
-| `tests/` | checks, one per behaviour; `python -m tests` runs them all |
-| `samples/` | tiny fixtures for the tests |
-| `scripts/` | one-off scripts, kept locally and not in git |
 
 Scans, results and the series cache live under `ct_scans/` and `projects/`, which
 git ignores, so patient data cannot be committed by accident.

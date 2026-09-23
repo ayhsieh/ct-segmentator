@@ -14,10 +14,9 @@ from pathlib import Path
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     os.environ["CT_DATA_ROOT"] = str(root)
-    import ct_paths
+    from ctseg import ct_paths
     ct_paths.DATA_ROOT = root
-    import produce_table
-
+    from ctseg import produce_table
     grp = root / "study"
     res = grp / "total_segmentor_results_study"
     # both cases carry a result; only one of them is still in the cohort

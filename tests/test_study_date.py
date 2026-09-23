@@ -36,12 +36,11 @@ def dicom(path, date):
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     os.environ["CT_DATA_ROOT"] = str(root)
-    import ct_paths
+    from ctseg import ct_paths
     ct_paths.DATA_ROOT = root
     ct_paths.APP_ROOT = root
     ct_paths.CACHE_FILE = root / ".series_selection_cache.json"
-    import ct_dates
-
+    from ctseg import ct_dates
     # a project made in the interface: scans live one level down, under scans/
     gui = root / "study" / "scans" / "CASE1"
     dicom(gui / "s2" / "1.dcm", "20260317")

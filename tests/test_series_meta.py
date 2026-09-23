@@ -18,7 +18,7 @@ import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from segment_structures import SOFT_KERNELS, get_series_metadata
+from ctseg.segment_structures import SOFT_KERNELS, get_series_metadata
 
 
 def scan(path, kernel):

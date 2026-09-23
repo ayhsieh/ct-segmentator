@@ -6,9 +6,9 @@ reads <group>/points/<case>.csv. Doing that conversion by hand is where it goes 
 the file has to be named after the case - exactly one match, or it is ignored without
 saying so - and the coordinates have to stay in LPS.
 
-    python markups_to_points.py --group STUDY SAMPLE1.mrk.json
-    python markups_to_points.py --group STUDY --case AB points/*.mrk.json
-    python markups_to_points.py --group STUDY --check
+    python -m ctseg.markups_to_points --group STUDY SAMPLE1.mrk.json
+    python -m ctseg.markups_to_points --group STUDY --case AB points/*.mrk.json
+    python -m ctseg.markups_to_points --group STUDY --check
 
 `--check` names every case whose landmarks the pipeline would not find, and why.
 """
@@ -17,8 +17,8 @@ import json
 import sys
 from pathlib import Path
 
-from ct_paths import group_dir
-from segment_fossae import MANUAL_LABELS, _norm_name
+from ctseg.ct_paths import group_dir
+from ctseg.segment_fossae import MANUAL_LABELS, _norm_name
 
 HEADER = ("# Markups outputs\n"
           "# CoordinateSystem = LPS\n")

@@ -16,9 +16,9 @@ and measured on its own:
 Self-contained: any case missing brain_structures or total/brain is segmented first
 by calling segment_structures.py, so a bare folder of DICOMs is enough to start.
 
-    python brain_icv.py --group STUDY
-    python brain_icv.py --group STUDY --case CASE_A
-    python brain_icv.py --group STUDY --limit 5 --nifti
+    python -m ctseg.brain_icv --group STUDY
+    python -m ctseg.brain_icv --group STUDY --case CASE_A
+    python -m ctseg.brain_icv --group STUDY --limit 5 --nifti
 
 Writes <case>/brain_icv.seg.nrrd and brain_icv.stats.json into the group's results
 folder, plus one brain_icv_volumes_ml.csv for the group.
@@ -33,10 +33,10 @@ import numpy as np
 import nibabel as nib
 import nrrd
 
-from segment_fossae import (log, load_bool, world_z, run_task_for_case,
+from ctseg.segment_fossae import (log, load_bool, world_z, run_task_for_case,
                             discover_cases, BRAIN_TASK)
-from ct_dates import study_date
-from ct_paths import seg_dir_for
+from ctseg.ct_dates import study_date
+from ctseg.ct_paths import seg_dir_for
 
 COLORS = {"intracranial_volume": "0.400 0.750 1.000", "brain": "1.000 0.450 0.450"}
 # taken out of the brain mask to leave parenchyma: CSF spaces and the dural folds

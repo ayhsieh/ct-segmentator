@@ -6,7 +6,7 @@
 cd "$(dirname "$0")"
 set -u
 
-. ./find_python.sh
+. ./launcher/find_python.sh
 
 PREFIX="$PWD/miniconda"
 PY="$PREFIX/bin/python"

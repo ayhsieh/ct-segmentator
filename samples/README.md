@@ -26,7 +26,7 @@ affine turn orientation and aspect bugs into wrong numbers rather than something
 have to eyeball.
 
 ```bash
-python samples/make_fixtures.py
+python -m samples.make_fixtures
 ```
 
 `SHAPES_TEST` is a sphere, a cube, a slab running off the edge of the volume, and a

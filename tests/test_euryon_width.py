@@ -9,7 +9,7 @@ check builds a box of known width, tilts the head, and asks for the width back.
 """
 import numpy as np
 
-from segment_fossae import frankfort_frame, width_euryon
+from ctseg.segment_fossae import frankfort_frame, width_euryon
 
 up = np.array([0.0, 0.0, 1.0])
 

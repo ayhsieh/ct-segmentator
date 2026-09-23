@@ -17,10 +17,10 @@ import numpy as np
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     os.environ["CT_DATA_ROOT"] = str(root)
-    import ct_paths
+    from ctseg import ct_paths
     ct_paths.DATA_ROOT = root
-    import markups_to_points as m2p
-    from segment_fossae import load_manual_landmarks
+    from ctseg import markups_to_points as m2p
+    from ctseg.segment_fossae import load_manual_landmarks
 
     def markups(system, points):
         return {"markups": [{"coordinateSystem": system, "controlPoints": [

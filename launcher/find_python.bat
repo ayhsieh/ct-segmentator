@@ -12,9 +12,9 @@ rem whole set the pipeline imports rather than totalsegmentator alone - Slicer s
 rem TotalSegmentator but not dicom2nifti or pynrrd, so a narrower test would pick a
 rem python that fails later, mid-run.
 
-set "HERE=%~dp0"
+set "HERE=%~dp0..\"
 rem Kept in step by hand with find_python.sh and the --selftest
-rem list in ct_gui.py.
+rem list in ctseg\ct_gui.py.
 set "NEEDS_MODULES=totalsegmentator pydicom dicom2nifti nibabel numpy scipy matplotlib pandas nrrd xmltodict skimage"
 set "FOUND_PY="
 set "PARTIAL_PY="
@@ -66,7 +66,7 @@ if not exist "%~1" exit /b 0
 set "MISS="
 rem check_env.py prints nothing when the interpreter has everything, and for /f skips
 rem that blank line, so MISS staying empty is the success case.
-for /f "delims=" %%M in ('""%~1" "%HERE%check_env.py" %NEEDS_MODULES%" 2^>nul') do set "MISS=%%M"
+for /f "delims=" %%M in ('""%~1" "%~dp0check_env.py" %NEEDS_MODULES%" 2^>nul') do set "MISS=%%M"
 if not defined MISS (
   set "FOUND_PY=%~1"
   exit /b 0

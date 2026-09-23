@@ -6,7 +6,7 @@ cd /d "%~dp0"
 setlocal
 
 echo   Looking for the Python this tool needs...
-call "%~dp0find_python.bat"
+call "%~dp0launcher\find_python.bat"
 
 if defined FOUND_PY goto :run
 
@@ -47,7 +47,7 @@ set "FOUND_PY=%PARTIAL_PY%"
 :run
 echo   Using: %FOUND_PY%
 echo   Starting the interface... a browser window will open.
-"%FOUND_PY%" ct_gui.py --open
+"%FOUND_PY%" -m ctseg.ct_gui --open
 echo.
 echo The server has stopped.
 pause

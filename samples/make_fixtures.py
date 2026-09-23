@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Build synthetic segmented projects for testing the viewers.
 
-    python samples/make_fixtures.py
+    python -m samples.make_fixtures
 
 Shapes with geometry you can assert on, rather than a scan you have to squint at -
 and nothing here is anyone's data. Two projects:
@@ -27,8 +27,8 @@ import numpy as np
 
 APP = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP))
-ss = importlib.import_module("segment_structures")
-bi = importlib.import_module("brain_icv")
+ss = importlib.import_module("ctseg.segment_structures")
+bi = importlib.import_module("ctseg.brain_icv")
 
 
 def project(group, case):

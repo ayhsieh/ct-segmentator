@@ -29,9 +29,9 @@ Steps, in order:
   5. Label every voxel by which side of the curves its column falls on, which is
      the vertical extrusion.
 
-    python segment_fossae.py --group fossa
-    python segment_fossae.py --group fossa --case CASE_A
-    python segment_fossae.py --group fossa --case CASE_A CASE_B CASE_C
+    python -m ctseg.segment_fossae --group fossa
+    python -m ctseg.segment_fossae --group fossa --case CASE_A
+    python -m ctseg.segment_fossae --group fossa --case CASE_A CASE_B CASE_C
 
 Writes <case>/fossae_simple.nii.gz / .seg.nrrd / .stats.json / _curves.npz
 and the floor-map picture _map.png (--no-map to skip).
@@ -48,8 +48,8 @@ import numpy as np
 import nibabel as nib
 from scipy import ndimage
 from scipy.interpolate import PchipInterpolator
-from ct_paths import seg_dir_for, group_dir
-from segment_structures import find_source_nifti, multilabel_to_segnrrd
+from ctseg.ct_paths import seg_dir_for, group_dir
+from ctseg.segment_structures import find_source_nifti, multilabel_to_segnrrd
 from totalsegmentator.map_to_binary import class_map
 
 # ---- from the plane-based pipeline this file replaces ------------------------
@@ -150,7 +150,7 @@ def predicted_landmarks(group, case, seg_out, bone_ctx):
     stats_p = seg_out / "cranial_bones.stats.json"
     if not stats_p.exists():
         try:
-            import label_cranial_bones as lcb
+            from ctseg import label_cranial_bones as lcb
             if "model" not in bone_ctx:
                 import torch
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -172,7 +172,7 @@ def predicted_landmarks(group, case, seg_out, bone_ctx):
 def run_task_for_case(group, case, device, task, extra=()):
     """Run segment_structures.py for ONE study folder, into the group's output tree."""
     subprocess.run(
-        [sys.executable, "segment_structures.py", str(group_dir(group) / case),
+        [sys.executable, "-m", "ctseg.segment_structures", str(group_dir(group) / case),
          "--group-name", group, "--task", task,
          "--skip-planning", "--device", device, *extra],
         check=True,
@@ -196,7 +196,7 @@ def ensure_group_segmented(group, cases, device):
     skipped = [c for c in cases if c not in ready]
     if skipped:
         log(f"WARNING: no {BRAIN_TASK} output for: {', '.join(skipped)}")
-        log(f"  (likely needs manual series selection: python segment_structures.py "
+        log(f"  (likely needs manual series selection: python -m ctseg.segment_structures "
             f"\"{group}\" --task {BRAIN_TASK})")
     return ready
 

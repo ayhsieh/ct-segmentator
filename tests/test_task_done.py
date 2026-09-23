@@ -14,7 +14,7 @@ the summary. Three cases sat in that loop.
 import tempfile
 from pathlib import Path
 
-from segment_structures import task_done
+from ctseg.segment_structures import task_done
 
 
 def case(tmp, name, files):
