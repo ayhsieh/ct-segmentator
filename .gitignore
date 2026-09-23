@@ -10,7 +10,7 @@ error_logs
 # QC renders and figures, anywhere. The README has no images, so nothing here needs
 # tracking; use `git add -f` if that ever changes.
 *.png
-archive/
+scripts/
 floor_maps/
 __pycache__/
 
