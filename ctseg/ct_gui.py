@@ -51,7 +51,9 @@ TOKEN = secrets.token_urlsafe(18)
 WIN = sys.platform == "win32"
 
 # Folders the pipeline creates inside a group - never offer these as cases
-RESERVED = ("converted_nifti_", "total_segmentor_results_", "points", "logs")
+# folders a project owns, never mistaken for a case; the first two are the old names
+RESERVED = ("converted_nifti_", "total_segmentor_results_", "points", "logs",
+            "nifti", "results")
 MAX_LOG_LINES = 4000
 
 
@@ -499,6 +501,19 @@ def scans_root(project):
     return d if d.is_dir() else PROJECTS / project
 
 
+def in_project(project, path):
+    """A path as project.json records it: relative when it is inside the project.
+
+    Absolute paths name the project's own folder, so renaming or moving the project
+    would leave every one of them pointing at a place that is no longer there. A path
+    outside the project - where a linked case came from - stays as it is.
+    """
+    try:
+        return Path(path).absolute().relative_to((PROJECTS / project).absolute()).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def case_dir(project, case):
     """Where one case's DICOMs are, whichever shape the project has."""
     return scans_root(project) / case
@@ -517,12 +532,18 @@ def load_project(name):
     except Exception:
         return None
     d["name"] = name
+    # stored relative when it is the project's own folder, so read it back as a place
+    src = d.get("source")
+    if src and not Path(src).is_absolute():
+        d["source"] = str(PROJECTS / name / src)
     return d
 
 
 def save_project(d):
     p = project_file(d["name"])
     p.parent.mkdir(parents=True, exist_ok=True)
+    if d.get("source"):
+        d = {**d, "source": in_project(d["name"], d["source"])}
     p.write_text(json.dumps(d, indent=2))
 
 
@@ -914,7 +935,8 @@ def job_scan(project, cases, quick=False, waiting=False):
         a project of any size was most of the wait."""
         # --quick before --scan: --scan takes the rest of the line, so a flag after it
         # is read as a path
-        argv = PY + ["-m", "ctseg.ct_gui"] + (["--quick"] if quick else []) + ["--scan"]
+        argv = (PY + ["-m", "ctseg.ct_gui", "--group", project]
+                + (["--quick"] if quick else []) + ["--scan"])
         # The folders go down stdin, not on the command line. Windows caps a command
         # line at about 32,000 characters, and a project of a few hundred cases at a
         # hundred characters of absolute path each goes straight past it - the whole
@@ -1042,9 +1064,9 @@ def job_import(name, source, chosen, mode, description="", delete_zips=False,
             ok, msg, sr = results.get(c["case"], (False, "cancelled", ""))
             if ok:
                 cases.append({"case": c["case"],
-                              "path": str(root / c["case"])
+                              "path": in_project(name, root / c["case"])
                               if (mode == "move" or c.get("zip")) else c["path"],
-                              "series_root": sr})
+                              "series_root": in_project(name, sr) if sr else sr})
             else:
                 failed.append(f"{c['case']}: {msg}")
 
@@ -1079,7 +1101,7 @@ AUTO_MIN_SCORE = _A.get("AUTO_SELECT_MIN_SCORE", 20)
 AUTO_MIN_GAP = _A.get("AUTO_SELECT_MIN_GAP", 15)
 
 
-def scan_folder(path, quick=False):
+def scan_folder(path, group, quick=False):
     """Run inside the --scan child. Reuses the pipeline's own scoring so the GUI can
     never disagree with what the CLI would have chosen."""
     # ct_paths, not segment_structures: answering from a recorded choice needs no
@@ -1087,11 +1109,10 @@ def scan_folder(path, quick=False):
     # megabytes of CUDA DLLs that Windows can refuse outright when commit is short.
     from ctseg.ct_paths import load_cache, cache_get, resolve_from_cache
     path = Path(path)
-    key = str(path.resolve())
-    entry = cache_get(load_cache(), path)
+    entry = cache_get(load_cache(group), path, group)
     cached = None
     if entry:
-        files, desc, snum = resolve_from_cache(entry, path)
+        files, desc, snum = resolve_from_cache(entry, path, group)
         if files:
             cached = {"snum": snum, "desc": desc,
                       "series_dir": entry.get("series_dir", "")}
@@ -1099,7 +1120,7 @@ def scan_folder(path, quick=False):
     if cached and quick:
         # This is the whole reason the command line starts instantly on a study it has
         # seen before: a recorded choice answers the question, so nothing is read.
-        return {"path": str(path), "key": key, "decision": "cached", "chosen": cached,
+        return {"path": str(path), "decision": "cached", "chosen": cached,
                 "series": [], "quick": True}
 
     from ctseg.segment_structures import get_series, get_series_metadata, score_series
@@ -1127,7 +1148,7 @@ def scan_folder(path, quick=False):
                       "series_dir": rows[0]["series_dir"]}
         else:
             decision = "manual"
-    return {"path": str(path), "key": key, "decision": decision, "chosen": chosen,
+    return {"path": str(path), "decision": decision, "chosen": chosen,
             "series": rows}
 
 
@@ -1149,9 +1170,9 @@ def convert_case(group, case):
 
     files = desc = None
     snum = ""
-    entry = cache_get(load_cache(), link)
+    entry = cache_get(load_cache(group), link, group)
     if entry:
-        files, desc, snum = resolve_from_cache(entry, link)
+        files, desc, snum = resolve_from_cache(entry, link, group)
     if not files:
         # No recorded pick, so score them the way the pipeline would and take the
         # winner only if it wins clearly. Anything closer than that is a choice for a
@@ -1200,31 +1221,25 @@ def job_convert(project, cases):
                queue_name="light")
 
 
-def write_pick(link_path, series_dir, snum, desc):
+def write_pick(group, link_path, series_dir, snum, desc):
     """Record a series choice where segment_structures will find it.
 
-    Written under every name the case answers to - see ct_paths.cache_keys - because a
-    junction means one case has more than one honest path, and which one a reader holds
-    depends on how it got there. Paths inside this checkout are recorded relative to it,
-    so moving or copying the whole folder keeps every choice.
+    Into the project's own series.json, with paths relative to the project, so the
+    choice moves with the project if it is renamed or copied.
     """
-    from ctseg.ct_paths import (load_cache, cache_get, cache_keys, anchored, unanchored,
-                          CACHE_FILE)
+    from ctseg.ct_paths import load_cache, cache_get, anchored, unanchored, save_cache
     link = Path(link_path)
     entry = {"snum": str(snum), "desc": desc,
-             "series_dir": anchored(series_dir)}
+             "series_dir": anchored(series_dir, group)}
     # One writer at a time, and the file replaced rather than rewritten in place. The
     # server is threaded and the page records a choice per case as the scan produces
     # it, so two of these can land together; read-modify-write without this leaves one
     # document written over the middle of another, and the cache will not parse.
     with _CACHE_LOCK:
-        cache = load_cache()
-        before = cache_get(cache, link)
-        for k in cache_keys(link):
-            cache[k] = entry
-        tmp = CACHE_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cache, indent=2), encoding="utf-8")
-        os.replace(tmp, CACHE_FILE)
+        cache = load_cache(group)
+        before = cache_get(cache, link, group)
+        cache[anchored(link, group)] = entry
+        save_cache(group, cache)
     # Whether this actually changes anything, so a choice that only confirms what was
     # already recorded does not throw away the conversion made from it. Compared as
     # places, not as text: one folder has several spellings - relative or absolute,
@@ -1233,7 +1248,7 @@ def write_pick(link_path, series_dir, snum, desc):
     # changing it and deleted a conversion that was still correct.
     def where(v):
         try:
-            return unanchored(v).resolve()
+            return unanchored(v, group).resolve()
         except (OSError, ValueError, TypeError):
             return None
 
@@ -2439,7 +2454,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/series/pick":
                 name = self._project(body)
                 case = self._case(body, name)
-                entry, changed = write_pick(case_dir(name, case), body["series_dir"],
+                entry, changed = write_pick(name, case_dir(name, case), body["series_dir"],
                                             body["snum"], body.get("desc", ""))
                 cleared = clear_converted(name, case) if changed else 0
                 return self._json({"saved": entry, "cleared_nifti": cleared})
@@ -2582,6 +2597,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--open", action="store_true", help="open a browser too")
+    ap.add_argument("--group", help="the project the --scan folders belong to")
     ap.add_argument("--scan", nargs="*", metavar="PATH",
                     help="internal: score the series of one or more folders; with no "
                          "paths, read them from stdin, one per line")
@@ -2603,7 +2619,7 @@ def main():
             if not path:
                 continue
             try:
-                out = scan_folder(path, quick=args.quick)
+                out = scan_folder(path, args.group, quick=args.quick)
             except Exception as e:
                 out = {"path": path, "error": f"{type(e).__name__}: {e}"}
             print(json.dumps(out), flush=True)   # one line per folder, as it finishes

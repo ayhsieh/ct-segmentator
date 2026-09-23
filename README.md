@@ -183,5 +183,19 @@ Inside `ctseg/`:
 | `markups_to_points.py` | hand-placed Slicer landmarks into the CSV the measurements read |
 | `ct_paths.py`, `ct_dates.py`, `label_cranial_bones.py` | shared by the scripts above |
 
-Scans, results and the series cache live under `ct_scans/` and `projects/`, which
-git ignores, so patient data cannot be committed by accident.
+Each project is one folder under `projects/`, and nothing inside it repeats its name:
+
+```
+projects/<name>/
+  project.json     the cases, their notes, which are set aside
+  series.json      which series was chosen for each case
+  scans/           the DICOMs, moved in or linked
+  nifti/           the converted scans
+  results/         segmentations and measurements, one folder per case
+```
+
+So renaming a project is renaming its folder - with the tool closed. Every path
+recorded inside is relative to the project, and the choices go with it.
+
+`projects/` and `ct_scans/` are ignored by git, so patient data cannot be committed
+by accident.

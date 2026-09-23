@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as tmp:
     ct_paths.DATA_ROOT = root
     from ctseg import produce_table
     grp = root / "study"
-    res = grp / "total_segmentor_results_study"
+    res = grp / "results"
     # both cases carry a result; only one of them is still in the cohort
     for case in ("KEEP", "DUPE"):
         (res / case).mkdir(parents=True)

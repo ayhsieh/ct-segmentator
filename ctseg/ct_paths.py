@@ -17,31 +17,6 @@ APP_ROOT = Path(__file__).resolve().parent.parent   # the top folder, not the pa
 DATA_ROOT = Path(os.environ.get("CT_DATA_ROOT", "ct_scans"))
 
 
-def anchored(p):
-    """A path as it should be recorded: relative to this checkout when it is inside it.
-
-    Everything a project owns now lives under it, so recording absolute paths ties the
-    cache to one machine and one folder name. Written relative, the whole checkout can
-    be moved, copied to another computer or handed to someone else and every recorded
-    series choice still points at the right folder.
-    """
-    p = Path(p)
-    try:
-        return str(p.resolve().relative_to(APP_ROOT))
-    except (ValueError, OSError):
-        return str(p)
-
-
-def unanchored(p):
-    """A recorded path as a real one.
-
-    Relative means relative to this file's folder, never to the working directory. Some
-    old entries were written relative to wherever the program happened to start, which
-    resolved from the repository root and nowhere else."""
-    p = Path(p)
-    return p if p.is_absolute() else APP_ROOT / p
-
-
 def is_dicom_file(path):
     """Is this a DICOM file? The preamble check: 128 bytes, then "DICM".
 
@@ -84,68 +59,126 @@ def case_dir_for(group, case):
     return under if under.is_dir() else root / case
 
 
+def _inner(group, name, old_prefix):
+    """`<group>/<name>`, moving a folder from the old naming into place the first time.
+
+    Inner folders used to repeat the group's name - `converted_nifti_<group>` - so
+    renaming a project meant renaming everything inside it as well. A checkout with
+    projects from before still has those, and the first call after the update moves
+    each into place, rather than finding an empty folder and reporting nothing done.
+    """
+    root = group_dir(group)
+    d = root / name
+    old = root / f"{old_prefix}_{root.name}"
+    if not d.exists() and old.exists():
+        try:
+            old.rename(d)
+        except OSError:           # the server and a job it started got there together
+            pass
+    return d
+
+
 def nifti_dir_for(group):
-    """Directory under `<group>/converted_nifti_<group>/` for a study group."""
-    return group_dir(group) / f"converted_nifti_{group}"
+    """The group's converted scans: `<group>/nifti/<case>/`."""
+    return _inner(group, "nifti", "converted_nifti")
 
 
 def seg_dir_for(group):
-    """Directory under `<group>/total_segmentor_results_<group>/` for a study group."""
-    return group_dir(group) / f"total_segmentor_results_{group}"
+    """The group's segmentations and measurements: `<group>/results/<case>/`."""
+    return _inner(group, "results", "total_segmentor_results")
 
 
-CACHE_FILE = Path(".series_selection_cache.json")
+# ------------------------------------------------------------- series choices
+# Each group keeps its own, in `<group>/series.json`, with every path relative to the
+# group's folder. Inside the group, so renaming or moving a project carries its choices
+# with it; relative, so nothing recorded names the folder it happens to be in.
+SERIES_FILE = "series.json"
+# every group used to share one file at the top of the checkout
+OLD_CACHE = APP_ROOT / ".series_selection_cache.json"
 
 
-def load_cache():
-    if CACHE_FILE.exists():
-        with open(CACHE_FILE, "r") as f:
-            return json.load(f)
-    return {}
+def series_file(group):
+    return group_dir(group) / SERIES_FILE
 
 
-def save_cache(cache):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=2)
+def anchored(p, group):
+    """A path as recorded: relative to the group's folder when it is inside it.
 
-
-def cache_keys(path):
-    """The names one case can be recorded under, best first.
-
-    Three of them. The anchored one is what gets written now. The absolute one is what
-    older entries hold, and what a case outside this checkout still needs. The literal
-    one covers a link whose target is elsewhere - a project can hold junctions, so a
-    case has two honest paths and which one a caller holds depends on how it got there.
+    Taken as written, not resolved. A case reached through a junction is recorded
+    where the project sees it, not where the scan physically lives - so the key is the
+    same however the case was reached, and survives the project being renamed.
     """
-    p = Path(path)
-    out = [anchored(p)]
+    p = Path(p).absolute()
     try:
-        out.append(str(p.resolve()))
-    except OSError:
-        pass
-    out.append(str(p))
-    seen, keys = set(), []
-    for k in out:
-        if k not in seen:
-            seen.add(k)
-            keys.append(k)
-    return keys
+        return p.relative_to(group_dir(group).absolute()).as_posix()
+    except ValueError:
+        return str(p)
 
 
-def cache_get(cache, path):
-    """The recorded choice for a case, under either of its names, or None."""
-    for k in cache_keys(path):
-        if k in cache:
-            return cache[k]
-    return None
+def unanchored(p, group):
+    """A recorded path as a real one: relative means relative to the group's folder."""
+    p = Path(p)
+    return p if p.is_absolute() else group_dir(group) / p
 
 
-def resolve_from_cache(entry, dicom_folder):
+def load_cache(group):
+    f = series_file(group)
+    if f.exists():
+        return json.loads(f.read_text(encoding="utf-8"))
+    return _from_old_cache(group)
+
+
+def save_cache(group, cache):
+    """Replaced rather than rewritten in place, so a reader never sees half a file."""
+    f = series_file(group)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+def cache_get(cache, path, group):
+    """The recorded choice for a case, or None."""
+    return cache.get(anchored(path, group))
+
+
+def _from_old_cache(group):
+    """This group's choices, taken out of the one file every group used to share.
+
+    Keys there were paths relative to the checkout, or absolute, and through a junction
+    they were the scan's real location rather than the project's link to it - so each
+    case is looked up under every name the old code could have written it as. Only the
+    group's own cases come across; the old file is left as it was.
+    """
+    if not OLD_CACHE.exists():
+        return {}
+    old = json.loads(OLD_CACHE.read_text(encoding="utf-8"))
+    root = group_dir(group)
+    base = root / "scans" if (root / "scans").is_dir() else root
+    out = {}
+    for case in (d for d in base.iterdir() if d.is_dir()) if base.is_dir() else ():
+        names = [str(case.absolute())]
+        try:
+            real = case.resolve()
+            names += [str(real), str(real.relative_to(APP_ROOT))]
+        except (OSError, ValueError):
+            pass
+        entry = next((old[n] for n in names if n in old), None)
+        if isinstance(entry, dict) and entry.get("series_dir"):
+            sd = Path(entry["series_dir"])
+            sd = sd if sd.is_absolute() else APP_ROOT / sd
+            out[anchored(case, group)] = {**entry, "series_dir": anchored(sd, group)}
+    if out:
+        save_cache(group, out)
+    return out
+
+
+def resolve_from_cache(entry, dicom_folder, group):
     """Try to resolve a work item from a cache entry (new dict format).
     Returns (files, desc, snum) or (None, None, None)."""
     if not isinstance(entry, dict) or not entry.get("series_dir"):
         return None, None, None
-    series_dir = unanchored(entry["series_dir"])
+    series_dir = unanchored(entry["series_dir"], group)
     if not series_dir.is_dir():
         return None, None, None
     files = [str(f) for f in series_dir.iterdir() if f.is_file()]

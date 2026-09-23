@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as tmp:
     from ctseg import ct_paths
     ct_paths.DATA_ROOT = root
     ct_paths.APP_ROOT = root
-    ct_paths.CACHE_FILE = root / ".series_selection_cache.json"
+    ct_paths.OLD_CACHE = root / ".series_selection_cache.json"   # never the real one
     from ctseg import ct_dates
     # a project made in the interface: scans live one level down, under scans/
     gui = root / "study" / "scans" / "CASE1"
@@ -62,9 +62,10 @@ with tempfile.TemporaryDirectory() as tmp:
     d, note = ct_dates.study_date("study", "CASE3")
     assert note.startswith("no series chosen"), note     # honest about guessing
 
-    ct_paths.CACHE_FILE.write_text(json.dumps({
-        ct_paths.anchored(both): {"snum": 5, "series_dir": ct_paths.anchored(both / "s5")},
-    }))
+    ct_paths.save_cache("study", {
+        ct_paths.anchored(both, "study"): {"snum": 5,
+                                           "series_dir": ct_paths.anchored(both / "s5", "study")},
+    })
     d, note = ct_dates.study_date("study", "CASE3")
     assert (d, note) == ("2025-09-09", ""), (d, note)    # was the folder's guess
 

@@ -219,8 +219,7 @@ def ensure_brain_floor(group, case, seg_out, ref_shape, device):
     return wz >= (zmin - 1e-3)
 
 def discover_cases(group):
-    for root in (seg_dir_for(group),
-                 group_dir(group) / f"converted_nifti_{group}"):
+    for root in (seg_dir_for(group), nifti_dir_for(group)):
         if root.is_dir():
             cases = sorted(d.name for d in root.iterdir() if d.is_dir())
             if cases:
@@ -228,7 +227,7 @@ def discover_cases(group):
     gdir = group_dir(group)
     if not gdir.is_dir():
         sys.exit(f"No such group folder: {group}")
-    skip = (f"converted_nifti_{group}", f"total_segmentor_results_{group}", "points")
+    skip = (nifti_dir_for(group).name, seg_dir_for(group).name, "points")
     return sorted(d.name for d in gdir.iterdir() if d.is_dir() and d.name not in skip)
 
 def clean_seed(mask, voxel_ml, min_ml=0.5, min_frac=0.05):

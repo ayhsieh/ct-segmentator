@@ -31,17 +31,16 @@ def _date_of(ds):
     return ""
 
 
-def _recorded_series(case_dir):
+def _recorded_series(group, case_dir):
     """The folder of the series that was chosen for this case, if one was.
 
-    Through ct_paths, because a choice is recorded under a path anchored to this
-    checkout and reading the file here meant only absolute keys ever matched - so a
-    case that had been answered still came back as never answered.
+    Through ct_paths, which knows where a group keeps its choices and how a case's
+    path is recorded there.
     """
-    entry = cache_get(load_cache(), case_dir)
+    entry = cache_get(load_cache(group), case_dir, group)
     if not isinstance(entry, dict) or not entry.get("series_dir"):
         return None
-    d = unanchored(entry["series_dir"])
+    d = unanchored(entry["series_dir"], group)
     return d if d.is_dir() else None
 
 
@@ -56,7 +55,7 @@ def study_date(group, case, limit=400, case_dir=None):
     if not case_dir.exists():
         return "", "case folder not found"
 
-    series = _recorded_series(case_dir)
+    series = _recorded_series(group, case_dir)
     if series is not None:
         for f in sorted(series.iterdir()):
             if not f.is_file():

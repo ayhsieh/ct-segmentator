@@ -19,8 +19,8 @@ with tempfile.TemporaryDirectory() as tmp:
     ct_paths.DATA_ROOT = root
     from ctseg import produce_table
     grp = root / "study"
-    (grp / "total_segmentor_results_study" / "DONE").mkdir(parents=True)
-    (grp / "total_segmentor_results_study" / "STRAY").mkdir(parents=True)
+    (grp / "results" / "DONE").mkdir(parents=True)
+    (grp / "results" / "STRAY").mkdir(parents=True)
     (grp / "project.json").write_text(json.dumps({
         "name": "study",
         # order matters: the table should follow the project, not the filesystem
@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert produce_table.case_notes("study")["SETASIDE"] == "no soft tissue scan"
 
     # a group with no project.json falls back to whatever results exist
-    (root / "cli" / "total_segmentor_results_cli" / "ONLY").mkdir(parents=True)
+    (root / "cli" / "results" / "ONLY").mkdir(parents=True)
     assert produce_table.project_cases("cli") == []
     assert produce_table.case_notes("cli") == {}
 

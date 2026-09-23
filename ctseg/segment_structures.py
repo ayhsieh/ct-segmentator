@@ -15,8 +15,8 @@ from collections import defaultdict
 # CSV builders - can find them without importing this module and, through it, torch.
 from ctseg.ct_paths import (DATA_ROOT, group_dir, is_dicom_file,  # noqa: F401
                       nifti_dir_for, seg_dir_for,
-                      anchored, unanchored, cache_get, cache_keys,
-                      CACHE_FILE, load_cache, save_cache, resolve_from_cache)
+                      anchored, unanchored, cache_get, series_file,
+                      load_cache, save_cache, resolve_from_cache)
 
 import pydicom
 import dicom2nifti
@@ -437,7 +437,7 @@ def score_series(meta):
     return score, reasons
 
 
-def prompt_series_selection(dicom_folder, scored_series, folder_key, cache):
+def prompt_series_selection(dicom_folder, scored_series, folder_key, cache, group):
     """Prompt user to pick a series. Returns (files, desc, snum) or None if skipped.
     scored_series is a list of (files, meta, score, reasons) tuples, sorted by score desc."""
     print(f"\n  Folder: {dicom_folder.name}")
@@ -464,9 +464,9 @@ def prompt_series_selection(dicom_folder, scored_series, folder_key, cache):
                 cache[folder_key] = {
                     "snum": meta["snum"],
                     "desc": meta["desc"],
-                    "series_dir": anchored(Path(files[0]).parent),
+                    "series_dir": anchored(Path(files[0]).parent, group),
                 }
-                save_cache(cache)
+                save_cache(group, cache)
                 print(f"  Selection series {meta['snum']} '{meta['desc'] or '(no description)'}' cached.")
                 return files, meta["desc"], meta["snum"]
             else:
@@ -539,7 +539,7 @@ def task_done(seg_out, task, roi_subset=None):
     return all((seg_out / task / f"{r}.nii.gz").exists() for r in (roi_subset or ()))
 
 
-def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=False,
+def plan_all_folders(all_folders, tasks, skip_manual=False, force_redo=False,
                      roi_subset=None):
     # all_folders is a list of (dicom_folder, group_name) tuples
     """
@@ -551,6 +551,7 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
     Returns list of (dicom_folder, files, desc, snum, tasks_to_run) tuples, where
     tasks_to_run is a subset of `tasks` that actually need to be run for that folder.
     """
+    caches = {}
     resolved = []
     needs_manual = []
 
@@ -587,14 +588,18 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
         if not tasks_to_run:
             continue
 
-        folder_key = anchored(dicom_folder)
+        # each group keeps its own choices, read once per run
+        if group not in caches:
+            caches[group] = load_cache(group)
+        cache = caches[group]
+        folder_key = anchored(dicom_folder, group)
 
         # Fast path: cached entry with stored directory - zero DICOM reads. Looked up
         # under every name the case answers to, so a choice made through the interface
         # and one made here are the same choice.
-        entry = cache_get(cache, dicom_folder)
+        entry = cache_get(cache, dicom_folder, group)
         if entry is not None:
-            files, desc, snum = resolve_from_cache(entry, dicom_folder)
+            files, desc, snum = resolve_from_cache(entry, dicom_folder, group)
             if files:
                 print(f"\n[CACHE] '{dicom_folder.name}' - series {snum} '{desc or '(no description)'}'")
                 resolved.append((dicom_folder, group, files, desc, snum, tasks_to_run))
@@ -628,7 +633,7 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
             cache[folder_key] = {
                 "snum": snum,
                 "desc": desc,
-                "series_dir": anchored(Path(best_files[0]).parent),
+                "series_dir": anchored(Path(best_files[0]).parent, group),
             }
             print(f"\n[AUTO] '{dicom_folder.name}' - series {snum} '{desc}' "
                   f"(score={best_score}, gap={gap})")
@@ -641,7 +646,8 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
         needs_manual.append((dicom_folder, group, folder_key, scored_series, tasks_to_run))
 
     # Batch save cache after all auto-selections
-    save_cache(cache)
+    for g, c in caches.items():
+        save_cache(g, c)
 
     # Prompt for all manual selections at once
     if needs_manual:
@@ -656,7 +662,8 @@ def plan_all_folders(all_folders, cache, tasks, skip_manual=False, force_redo=Fa
             print("=" * 60)
 
             for dicom_folder, group, folder_key, scored_series, tasks_to_run in needs_manual:
-                result = prompt_series_selection(dicom_folder, scored_series, folder_key, cache)
+                result = prompt_series_selection(dicom_folder, scored_series, folder_key,
+                                                 caches[group], group)
                 if result is not None:
                     files, desc, snum = result
                     resolved.append((dicom_folder, group, files, desc, snum, tasks_to_run))
@@ -905,7 +912,7 @@ def main():
                         help="Override the group name used for output paths. Lets a single "
                              "study folder be processed into its group's output tree, e.g. "
                              "`python -m ctseg.segment_structures fossa/CASE1 --group-name fossa` writes to "
-                             "fossa/total_segmentor_results_fossa/CASE1 instead of treating "
+                             "fossa/results/CASE1 instead of treating "
                              "CASE1 as its own group.")
     parser.add_argument("--stats-only", action="store_true",
                         help="Skip segmentation; only recompute statistics from existing multilabel files.")
@@ -927,8 +934,6 @@ def main():
     # Deduplicate tasks while preserving order
     seen = set()
     tasks = [t for t in args.task if not (t in seen or seen.add(t))]
-
-    cache = load_cache()
 
     # Expand any parent folders into their subfolders
     all_folders = []
@@ -1006,7 +1011,7 @@ def main():
         return
 
     # Resolve work items (series selection)
-    work_items = plan_all_folders(all_folders, cache, tasks,
+    work_items = plan_all_folders(all_folders, tasks,
                                    skip_manual=args.skip_planning,
                                    force_redo=args.force_redo,
                                    roi_subset=args.roi_subset)

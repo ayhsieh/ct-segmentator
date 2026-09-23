@@ -33,8 +33,8 @@ bi = importlib.import_module("ctseg.brain_icv")
 
 def project(group, case):
     p = APP / "projects" / group
-    nii = p / f"converted_nifti_{group}" / case
-    seg = p / f"total_segmentor_results_{group}" / case
+    nii = p / "nifti" / case
+    seg = p / "results" / case
     for d in (nii, seg):
         d.mkdir(parents=True, exist_ok=True)
     return p, nii, seg

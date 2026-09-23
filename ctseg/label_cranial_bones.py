@@ -309,7 +309,7 @@ def main():
     if args.case:
         cases = [args.case]
     else:
-        nifti_root = Path(args.group) / f"converted_nifti_{args.group}"
+        nifti_root = nifti_dir_for(args.group)
         if not nifti_root.is_dir():
             sys.exit(f"No converted NIfTIs at {nifti_root} - run segment_structures.py "
                      f"(or segment_fossae.py) for this group first.")
