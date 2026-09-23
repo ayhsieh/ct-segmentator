@@ -41,6 +41,7 @@ dicom2nifti_settings.disable_validate_multiframe_implicit()
 # The two internal test models ("test", "total_highres_test") are deliberately absent.
 AVAILABLE_TASKS = [
     "total", "total_mr",
+    "dentalsegmentator",        # not TotalSegmentator's - see run_dentalsegmentator
     "body", "body_mr",
     "vertebrae_mr",
     "lung_vessels",
@@ -474,6 +475,45 @@ def prompt_series_selection(dicom_folder, scored_series, folder_key, cache):
             print("  Invalid input, please enter a number.")
 
 
+# DentalSegmentator (Dot et al., J Dent 2024) is one nnU-Net model rather than a
+# TotalSegmentator task: a single run gives all five labels, trained on CT and CBCT.
+# It runs on the nnU-Net TotalSegmentator already installed, on the same GPU, and its
+# output gets the same labelled header - so seg.nrrd, stats and the per-structure masks
+# after it are the ordinary path, unchanged.
+DENTAL_TASK = "dentalsegmentator"
+DENTAL_DIR = (Path.home() / ".dentalsegmentator" / "Dataset112_DentalSegmentator_v100"
+              / "nnUNetTrainer__nnUNetPlans__3d_fullres")
+DENTAL_URL = ("https://zenodo.org/api/records/10829675/files/"
+              "Dataset112_DentalSegmentator_v100.zip/content")
+DENTAL_LABELS = {1: "upper_skull", 2: "mandible", 3: "upper_teeth", 4: "lower_teeth",
+                 5: "mandibular_canal"}
+
+
+def run_dentalsegmentator(nifti_path, multilabel_path, device):
+    """Segment one CT with DentalSegmentator into a labelled multilabel NIfTI."""
+    if not (DENTAL_DIR / "fold_0" / "checkpoint_final.pth").exists():
+        raise RuntimeError(f"DentalSegmentator weights are not in {DENTAL_DIR}. "
+                           f"Download {DENTAL_URL} and unzip it into "
+                           f"{DENTAL_DIR.parents[1]}")
+    # nnU-Net warns on import about training folders inference never touches
+    for k in ("nnUNet_raw", "nnUNet_preprocessed", "nnUNet_results"):
+        os.environ.setdefault(k, str(DENTAL_DIR.parents[1]))
+    import torch
+    from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+    from totalsegmentator.nifti_ext_header import save_multilabel_nifti
+
+    dev = torch.device({"gpu": "cuda"}.get(device, device))
+    p = nnUNetPredictor(device=dev, allow_tqdm=False)
+    p.initialize_from_trained_model_folder(str(DENTAL_DIR), use_folds=(0,))
+    out = str(multilabel_path)[:-len(".nii.gz")]
+    p.predict_from_files([[str(nifti_path)]], [out], overwrite=True,
+                         num_processes_preprocessing=1,
+                         num_processes_segmentation_export=1)
+    img = nib.load(str(multilabel_path))
+    img = nib.Nifti1Image(np.asarray(img.dataobj).astype(np.uint8), img.affine, img.header)
+    save_multilabel_nifti(img, str(multilabel_path), DENTAL_LABELS)
+
+
 def task_done(seg_out, task, roi_subset=None):
     """Has this task already produced what was asked of it?
 
@@ -481,8 +521,20 @@ def task_done(seg_out, task, roi_subset=None):
     where the proof is those structures on disk. A run from before a structure joined
     the subset leaves a task.seg.nrrd without it, and calling that done means the mask
     can never be made: every later run sees the file, skips, and is asked again.
+
+    The same trap catches a task.seg.nrrd whose folder of separate masks is empty. That
+    file is a summary of the masks beside it, and the analyses read the masks, not the
+    summary - so an empty folder is a task that has not produced what was asked of it,
+    however complete the summary looks.
+
+    ponytail: a task that genuinely segmented nothing also leaves an empty folder, and
+    would be re-run every time. Re-running it is the better of the two wrongs - the
+    other one never populates - and on these tasks a head CT with no structure at all
+    is not a case worth keeping anyway.
     """
     if not (seg_out / f"{task}.seg.nrrd").exists():
+        return False
+    if not any((seg_out / task).glob("*.nii.gz")):
         return False
     return all((seg_out / task / f"{r}.nii.gz").exists() for r in (roi_subset or ()))
 
@@ -1034,8 +1086,11 @@ def main():
                 if args.license_number:
                     kwargs["license_number"] = args.license_number
 
-                from totalsegmentator.python_api import totalsegmentator
-                totalsegmentator(**kwargs)
+                if task == DENTAL_TASK:
+                    run_dentalsegmentator(nifti_path, multilabel_path, args.device)
+                else:
+                    from totalsegmentator.python_api import totalsegmentator
+                    totalsegmentator(**kwargs)
 
                 # --- Compute our own per-class statistics from the multilabel file ---
                 print(f"    Computing statistics...")
