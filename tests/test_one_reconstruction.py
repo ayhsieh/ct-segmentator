@@ -6,7 +6,7 @@ SeriesInstanceUID, so the scan groups them together and both land in the chosen
 folder. A converter given both sees the slice spacing change halfway down, treats
 the series as 4D, and refuses it with the famously unhelpful MISSING_DICOM_FILES.
 
-    python test_one_reconstruction.py
+    python -m tests.test_one_reconstruction
 """
 import tempfile
 from pathlib import Path

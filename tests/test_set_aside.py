@@ -4,7 +4,7 @@ Setting a case aside does not delete what was already computed for it, so the st
 files stay on disk. If the table reads them anyway, an excluded case goes on being
 counted - which is how a duplicate import ends up in a cohort twice.
 
-    python test_set_aside.py
+    python -m tests.test_set_aside
 """
 import json
 import os

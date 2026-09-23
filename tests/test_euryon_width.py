@@ -5,7 +5,7 @@ come out upside down, so "level" tilts the wrong way; and the width can be read 
 the outer table, which is a different measurement that already has a column. The
 check builds a box of known width, tilts the head, and asks for the width back.
 
-    python test_euryon_width.py
+    python -m tests.test_euryon_width
 """
 import numpy as np
 

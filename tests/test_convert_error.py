@@ -5,7 +5,7 @@ empty, a folder whose files are not DICOM, and a folder it merely would not acce
 Those want four different things done about them, so the message has to tell them
 apart - "MISSING_DICOM_FILES" on its own sends you looking in the wrong place.
 
-    python test_convert_error.py
+    python -m tests.test_convert_error
 """
 import tempfile
 from pathlib import Path

@@ -5,7 +5,7 @@ either LPS or RAS, the loader assumes LPS), and a label the loader does not know
 it drops without a word. Both are checked here by round-tripping through the real
 loader rather than by reading the file back.
 
-    python test_markups_points.py
+    python -m tests.test_markups_points
 """
 import json
 import os

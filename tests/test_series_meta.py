@@ -9,7 +9,7 @@ head scan then showed up in the series picker as
 and, worse, none of the SOFT_KERNELS substrings matched it, so the series scored as if
 its kernel were unknown.
 
-    python test_series_meta.py
+    python -m tests.test_series_meta
 """
 import tempfile
 from pathlib import Path

@@ -4,7 +4,7 @@ The interesting part is not storing a string, it is clearing one: an emptied not
 to be removed, or a project collects a key for every case anyone ever clicked on and
 `notes` slowly fills with empty strings that read as "there is a note here".
 
-    python test_case_note.py
+    python -m tests.test_case_note
 """
 from ct_gui import set_note
 

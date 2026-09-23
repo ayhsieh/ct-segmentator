@@ -5,7 +5,7 @@ never converted simply had no row - which makes a cohort table look complete whe
 is not. The row for such a case is mostly empty, and that is the point: the name and
 the note are the record of why it is not there.
 
-    python test_table_rows.py
+    python -m tests.test_table_rows
 """
 import json
 import os

@@ -9,7 +9,7 @@ The same rule has to hold when nothing was named: a task.seg.nrrd beside an empt
 folder is the same dead end, because the analyses read the separate masks and not
 the summary. Three cases sat in that loop.
 
-    python test_task_done.py
+    python -m tests.test_task_done
 """
 import tempfile
 from pathlib import Path

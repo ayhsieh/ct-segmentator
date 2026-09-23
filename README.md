@@ -159,3 +159,21 @@ python produce_table.py --group STUDY
 
 These look for study folders under `ct_scans/`; set `CT_DATA_ROOT` to keep scans
 elsewhere. `python ct_gui.py --selftest` reports what is installed.
+
+## Layout
+
+| Where | What |
+|---|---|
+| `ct_gui.py`, `ct_gui_page.html` | the browser tool |
+| `segment_structures.py` | DICOM to NIfTI, then TotalSegmentator or DentalSegmentator |
+| `segment_fossae.py`, `brain_icv.py` | the measurements: fossa volumes, linear measurements, brain and ICV |
+| `produce_table.py` | one CSV per project from every result on disk |
+| `markups_to_points.py` | hand-placed Slicer landmarks into the CSV the measurements read |
+| `ct_paths.py`, `ct_dates.py`, `label_cranial_bones.py` | shared by the scripts above |
+| `start.*`, `install.command`, `find_python.*`, `check_env.py` | launchers |
+| `tests/` | checks, one per behaviour; `python -m tests` runs them all |
+| `samples/` | tiny fixtures for the tests |
+| `scripts/` | one-off scripts, kept locally and not in git |
+
+Scans, results and the series cache live under `ct_scans/` and `projects/`, which
+git ignores, so patient data cannot be committed by accident.

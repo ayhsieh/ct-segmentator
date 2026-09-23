@@ -9,7 +9,7 @@ Fails if either bug that emptied the study_date column comes back:
     ct_dates only matched absolute keys, so an answered case looked unanswered and
     the date was read from the whole folder instead of the chosen series.
 
-    python test_study_date.py
+    python -m tests.test_study_date
 """
 import json
 import os
