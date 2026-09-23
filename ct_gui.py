@@ -256,14 +256,6 @@ ANALYSES = {
         "needs": ["brain_structures"],
         "proofs": ["*fossae_simple.stats.json"],
     },
-    "linear": {
-        "label": "Cranial linear measurements",
-        "blurb": "width, length, height, circumference and the cranial heights",
-        "script": "segment_fossae.py",
-        "args": ["--linear-only"],
-        "needs": ["brain_structures"],
-        "proofs": ["*cranial_linear.stats.json"],
-    },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
