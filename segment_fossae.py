@@ -61,7 +61,11 @@ COLORS = {
     "posterior_fossa": "0.150 0.800 0.300",
 }
 MANUAL_LABELS = ("g", "o", "n", "s", "op", "ba",
-                 "ACP(L)", "ACP(R)", "ZMF(L)", "ZMF(R)", "PR(L)", "PR(R)")
+                 "ACP(L)", "ACP(R)", "ZMF(L)", "ZMF(R)", "PR(L)", "PR(R)",
+                 # orbitale, the lowest point of each inferior orbital rim. With the
+                 # two porions it is what Frankfort horizontal is defined by, and it
+                 # is not the same point as ZMF, which is the upper rim.
+                 "OR(L)", "OR(R)")
 SEED_GROUPS = {
     "anterior_fossa": ("frontal_lobe",),
     "middle_fossa": ("temporal_lobe", "parietal_lobe", "insular_cortex",
@@ -1056,6 +1060,18 @@ def cranial_vault_heights(ct_path, icv, seg_out, group, case, affine, mid, up, f
         out[name + "_cranial_height"] = round(high, 1)
         pts[name + "_cranial_foot"] = [round(float(v), 2) for v in cut.world(mark)]
         pts[name + "_cranial_top"] = [round(float(v), 2) for v in cut.world(tip)]
+    # Cranial length as the craniofacial literature defines it: nasion to
+    # opisthocranion in the midsagittal plane. Not the same line as length_ofd, which
+    # starts at glabella - glabella is the brow, nasion the notch above it at the nasal
+    # root, so the two differ by a real amount on the same head.
+    if opisthocranion is not None:
+        op2 = cut.flat(np.asarray(opisthocranion, float))
+        out["length_nasion_opisthocranion"] = round(
+            float(np.linalg.norm(N - op2)), 1)
+        pts["length_n_op_front"] = [round(float(v), 2) for v in cut.world(N)]
+        pts["length_n_op_back"] = [round(float(v), 2) for v in
+                                   np.asarray(opisthocranion, float)]
+
     for name, mark in (("nasion", N), ("sella", S), ("basion", BA),
                        ("opisthion", OP)):
         if mark is not None:
@@ -1088,6 +1104,61 @@ def cranial_vault_heights(ct_path, icv, seg_out, group, case, affine, mid, up, f
                                   - np.asarray(opisthocranion, float)))
         out["turricephaly_index"] = round(fo / mid_h, 3)
     return out, pts, None
+
+
+def frankfort_frame(hand, up):
+    """The Frankfort horizontal as three axes, from hand-placed points, or None.
+
+    Frankfort horizontal is the plane through the two porions and orbitale. Nothing
+    here estimates it: porion sits in the external auditory meatus and orbitale on the
+    lower orbital rim, and a head CT taken for the brain crops one or both away often
+    enough that a detector would be guessing on the cases that matter. They are placed
+    by hand in the papers that use them, and they are placed by hand here.
+
+    Returns (left-right, plane normal, forward), all in world coordinates.
+    """
+    need = ("PR(L)", "PR(R)")
+    if not all(k in hand for k in need):
+        return None
+    orb = [hand[k] for k in ("OR(L)", "OR(R)") if k in hand]
+    if not orb:
+        return None
+    p_l = np.asarray(hand["PR(L)"], float)
+    p_r = np.asarray(hand["PR(R)"], float)
+    o = np.mean([np.asarray(v, float) for v in orb], axis=0)
+    n = unit(np.cross(p_r - p_l, o - p_l))
+    if n @ up < 0:
+        n = -n
+    across = p_r - p_l
+    across = unit(across - (across @ n) * n)      # the porion axis, laid in the plane
+    return across, n, unit(np.cross(n, across))
+
+
+def width_euryon(icv, affine, hand, up):
+    """Euryon to euryon, inner cortex, in a line parallel to Frankfort horizontal.
+
+    Euryon is where the braincase is widest, and the inner cortex of the calvarium is
+    the surface the intracranial volume stops at - so the two points are the extremes
+    of that volume across the head. "Parallel to FH" is what makes the measurement
+    repeatable between two scans of the same head taken at different tilts, and it is
+    the only part that needs the hand-placed points.
+
+    Returns (width, point, point, why_not).
+    """
+    fr = frankfort_frame(hand, up)
+    if fr is None:
+        return None, None, None, ("Frankfort horizontal needs both porions and an "
+                                  "orbitale placed by hand")
+    across, n, fwd = fr
+    W = mask_world_coords(icv, affine, max_pts=200000)
+    if W is None:
+        return None, None, None, "no intracranial volume to measure across"
+    lane, h, fv = W @ across, W @ n, W @ fwd
+    got = level_extremes(np.arange(len(W)), lane, h, fv, least=20)
+    if got is None:
+        return None, None, None, "no level pair of points across the head"
+    width, li, ri = got
+    return float(width), W[li], W[ri], ""
 
 
 def level_extremes(sel, along, l1, l2, step=3.0, least=8):
@@ -1488,6 +1559,19 @@ def measure_outside(stats, seg_out, vol, lc, ant, post, affine, mid, up, lr, fwd
         log("no total/skull mask - outer measurements skipped", 2)
         return
     stats["outer_mm"] = lin
+
+    # Euryon to euryon on the inner cortex, levelled on Frankfort horizontal. A
+    # different measurement from width_bpd above, which is the outer table and takes
+    # its level from the head's own frame - so both are reported rather than one
+    # quietly replacing the other.
+    w, wl, wr, why = width_euryon(icv, affine, load_manual_landmarks(group, case), up)
+    if w is None:
+        lin["width_euryon_missing"] = why
+    else:
+        lin["width_euryon"] = round(w, 1)
+        lin["points"]["euryon_inner_a"] = [round(float(v), 2) for v in wl]
+        lin["points"]["euryon_inner_b"] = [round(float(v), 2) for v in wr]
+        log("euryon width (inner cortex, on FH): %.0f mm" % w, 2)
     log("outer: length %.0f  width %.0f  height %.0f  CI %.0f"
         % (lin["length_ofd"], lin["width_bpd"], lin["height"],
            lin["cranial_index"] or 0), 2)
