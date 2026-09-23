@@ -35,6 +35,18 @@ from ct_dates import study_date
 from ct_paths import group_dir, seg_dir_for, nifti_dir_for
 
 
+def _project(group):
+    """The project file, or an empty one for a group that has no interface project.
+
+    Read straight off disk. Going through the server module would drag the whole
+    interface, and torch behind it, into a CSV build."""
+    try:
+        return json.loads((group_dir(group) / "project.json")
+                          .read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def project_cases(group):
     """Every case the project lists, in the order it lists them.
 
@@ -43,23 +55,23 @@ def project_cases(group):
     table is exactly the one worth seeing. Empty for a group made on the command line,
     which has no project.json; the results folder covers that.
     """
-    try:
-        text = (group_dir(group) / "project.json").read_text(encoding="utf-8")
-        return [c["case"] for c in json.loads(text).get("cases", []) if c.get("case")]
-    except Exception:
-        return []
+    return [c["case"] for c in _project(group).get("cases", []) if c.get("case")]
 
 
 def case_notes(group):
-    """Whatever was written about each case on the project screen, by case name.
+    """Whatever was written about each case on the project screen, by case name."""
+    return _project(group).get("notes", {})
 
-    Read straight off project.json. Going through the server module would drag the
-    whole interface, and torch behind it, into a CSV build."""
-    try:
-        text = (group_dir(group) / "project.json").read_text(encoding="utf-8")
-        return json.loads(text).get("notes", {})
-    except Exception:
-        return {}
+
+def set_aside(group):
+    """The cases the project has set aside.
+
+    Their results may well still be on disk - setting a case aside does not delete
+    what was already computed - so the table has to leave the numbers out itself.
+    The row stays, carrying the name and the note, because a cohort table that simply
+    drops an excluded case is how a case gets excluded twice: once from the study and
+    once from the record of the study."""
+    return set(_project(group).get("skipped", []))
 
 
 # Everything millilitres, so any two columns can be read against each other. The unit
@@ -166,7 +178,10 @@ def main():
                          "project.json lists any. Run segment_structures.py first.")
     rows = {case: {} for case in cases}
 
+    aside = set_aside(args.group)
     for case in cases:
+        if case in aside:
+            continue
         case_dir = total_dir / case
         for f in stats_files(case_dir):
             task = f.name[: -len(".stats.json")]
