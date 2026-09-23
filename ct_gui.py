@@ -99,6 +99,7 @@ BLURB = {
     "oculomotor_muscles": "the extraocular muscles and optic nerve",
     "craniofacial_structures": "mandible, teeth, skull and sinuses",
     "teeth": "the teeth individually",
+    "dentalsegmentator": "upper skull, mandible, upper and lower teeth, mandibular canal",
     "abdominal_muscles": "the core and torso muscles",
     "trunk_cavities": "the abdominal and thoracic cavities, and the mediastinum",
     "brain_structures": "brain regions: lobes, cerebellum, brainstem, ventricles, CSF",
@@ -618,6 +619,13 @@ class Job:
         self.label = label
         self.steps = steps              # list of (caption, argv) or ("fn", callable)
         self.queue = queue_name
+        # Which screen this job belongs to, and what that screen needs to draw itself
+        # again. A run is watched from a screen, and the screen outlives no page reload
+        # unless the server can say what it was - so the job carries it rather than a
+        # JavaScript variable that the first navigation throws away.
+        self.run = self.id          # jobs launched together share the first one's id
+        self.view = ["run"]         # nav() parts, after the project name
+        self.resume = {}            # whatever else that screen was opened with
         self.state = "queued"
         self.lines = deque(maxlen=MAX_LOG_LINES)
         self.seq = 0
@@ -641,6 +649,7 @@ class Job:
         return {
             "id": self.id, "kind": self.kind, "project": self.project,
             "label": self.label, "state": self.state, "rc": self.rc,
+            "run": self.run,
             "step": self.step_i, "steps": self.step_n, "step_label": self.step_label,
             "elapsed": round((self.ended or time.time()) - (self.started or time.time()), 1)
             if self.started else 0,
@@ -2177,7 +2186,9 @@ class Handler(BaseHTTPRequestHandler):
                                    "python": sys.executable})
             if u.path == "/api/tasks":
                 tasks = [{"name": t, "licensed": t in LICENSED_TASKS,
-                          "blurb": BLURB.get(t, "")}
+                          "blurb": BLURB.get(t, ""),
+                          # the one row that is not TotalSegmentator says so
+                          "model": "DentalSegmentator" if t == "dentalsegmentator" else ""}
                          for t in sorted(AVAILABLE_TASKS + LICENSED_TASKS)]
                 return self._json({"tasks": tasks, "analyses": ANALYSES,
                                    "license_stored": license_stored()})
@@ -2218,7 +2229,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"jobs": [
                     {"id": j.id, "project": j.project, "label": j.label,
                      "state": j.state, "step": j.step_i, "steps": j.step_n,
-                     "step_label": j.step_label} for j in live]})
+                     "step_label": j.step_label,
+                     # where "view" should go: the screen that started this job
+                     "view": j.view + [j.run]} for j in live]})
+            if u.path == "/api/resume":
+                # Everything a watching screen needs to come back: which jobs the run
+                # is made of, in order, and whatever the screen was opened with. Keyed
+                # by the run id, which for a single job is that job's own id.
+                rid = q.get("id", "")
+                with LOCK:
+                    jobs = [j for j in JOBS.values() if j.run == rid]
+                if not jobs:
+                    return self._json({"error": "that run is no longer on the server"},
+                                      404)
+                first = jobs[0]
+                return self._json({"project": first.project,
+                                   "jobs": [j.id for j in jobs],
+                                   "view": first.view,
+                                   "resume": first.resume})
             if u.path == "/api/job":
                 jid = q.get("id", "")
                 job = JOBS.get(jid)
@@ -2401,9 +2429,13 @@ class Handler(BaseHTTPRequestHandler):
                 name = self._project(body)
                 pr = load_project(name)
                 cases = body.get("cases") or [c["case"] for c in pr["cases"]]
-                return self._json({"job": submit(
-                    job_scan(name, cases, quick=bool(body.get("quick")),
-                             waiting=bool(body.get("waiting")))).id})
+                job = job_scan(name, cases, quick=bool(body.get("quick")),
+                               waiting=bool(body.get("waiting")))
+                # A scan is watched from the series screen, not the generic run screen,
+                # and that screen needs the run it was about to start.
+                job.view = ["series"]
+                job.resume = {"plan": body.get("plan"), "cases": cases}
+                return self._json({"job": submit(job).id})
 
             if u.path == "/api/convert":
                 name = self._project(body)
@@ -2466,7 +2498,12 @@ class Handler(BaseHTTPRequestHandler):
                                          bool(body.get("force")))).id)
                 if not ids:
                     return self._json({"error": "nothing selected"}, 400)
-                return self._json({"jobs": ids})
+                # One run, however many jobs it took: the screen follows them in order
+                # and has to be able to ask for the whole list again later.
+                with LOCK:
+                    for i in ids:
+                        JOBS[i].run = ids[0]
+                return self._json({"jobs": ids, "run": ids[0]})
 
             if u.path == "/api/table":
                 name = self._project(body)

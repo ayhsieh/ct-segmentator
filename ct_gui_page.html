@@ -72,7 +72,7 @@ body.railed .pitem{justify-content:center;padding:6px}
 body.railed #side .top{justify-content:center;padding:15px 0 11px}
 body.railed #rail{margin:0}
 .crumb{color:var(--faint);font-family:var(--sans);font-size:14px}
-main{overflow:auto;min-height:0;padding:26px 30px 90px}
+main{overflow:auto;min-height:0;padding:26px 30px 24px}
 main>#view{max-width:1180px;margin:0 auto}
 /* Prose wants a short line; a table of three hundred cases wants the room. */
 .reading{max-width:660px}
@@ -90,7 +90,7 @@ main>#view{max-width:1180px;margin:0 auto}
 /* Structures and analyses side by side: both are lists you scan, and stacked they put
    the start button off the bottom of the screen. */
 .runcols{display:grid;grid-template-columns:1fr 340px;gap:22px;align-items:start}
-.runcols .tasklist{max-height:min(52vh,460px)}
+
 .lbl{font-family:var(--sans);font-size:11px;letter-spacing:.09em;text-transform:uppercase;
   color:var(--faint);margin:0 0 7px}
 .runbar{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
@@ -144,7 +144,7 @@ tr.sel td{background:var(--accentdim)}
 
 /* A run, step by step. Each row says what it is and where it has got to; the log is
    the same information at a hundred times the length, so it waits behind a toggle. */
-.steps{max-height:min(46vh,420px);overflow:auto;border:1px solid var(--line);
+.steps{overflow:auto;border:1px solid var(--line);
   border-radius:8px;background:var(--surface)}
 .step{display:flex;align-items:center;gap:11px;padding:7px 14px;
   font-family:var(--sans);font-size:14px;border-bottom:1px solid #ece6da}
@@ -174,8 +174,10 @@ tr.sel td{background:var(--accentdim)}
 .pcard .src{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:auto;
   padding-top:8px}
 #log.hide{display:none}
-.tasklist{max-height:400px;overflow:auto;border:1px solid var(--line);border-radius:8px;
+.tasklist{overflow:auto;border:1px solid var(--line);border-radius:8px;
   background:var(--surface)}
+/* the ones the Run tab measures get no ceiling; the rest keep a sensible one */
+.tasklist:not(#tl):not(#al){max-height:400px}
 
 /* The case list scrolls inside itself. Otherwise a project of any size puts what to
    segment, and the button that starts it, a page-length below the fold - and at a
@@ -226,9 +228,11 @@ body.wide main>#view{max-width:none}
    screen at once and each one is a picture, not a row in a table. Only the case on the
    stage loads previews, which is what makes showing them by default affordable. */
 .serwrap{display:grid;grid-template-columns:262px minmax(0,1fr);
-  border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;
+  background:var(--surface);min-height:0}
+.serwrap>*{min-height:0}
 .serq{border-right:1px solid var(--line);background:var(--panel);display:flex;
-  flex-direction:column;min-height:0;max-height:min(66vh,620px)}
+  flex-direction:column;min-height:0}
 .qhead{padding:10px 13px;border-bottom:1px solid var(--edge);font-family:var(--sans);
   font-size:13px;color:var(--mid)}
 #qlist{overflow:auto;flex:1;min-height:0}
@@ -245,7 +249,7 @@ body.wide main>#view{max-width:none}
 .qi.pend .dot{background:var(--edge)}
 .qi .st{font-size:12px;color:var(--faint);font-weight:400;white-space:nowrap}
 .serstage{padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:12px;
-  max-height:min(66vh,620px);overflow:auto}
+  overflow:auto}
 .stagehead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .stagehead h2{margin:0;font-size:19px;font-family:ui-monospace,Menlo,Consolas,monospace}
 /* the tiles pack from the left and stop growing, so an ultrawide gets more of them
@@ -275,15 +279,17 @@ body.wide main>#view{max-width:none}
   font-weight:600}
 @media (max-width:900px){
   .serwrap{grid-template-columns:1fr}
-  .serq{border-right:0;border-bottom:1px solid var(--line);max-height:170px}
+  .serq{border-right:0;border-bottom:1px solid var(--line);max-height:170px!important}
 }
 .vwrap{display:grid;grid-template-columns:270px 1fr;gap:16px;align-items:start}
 .vwrap.hide,.vrow[hidden],.vgrp[hidden]{display:none}
 .vside{border:1px solid var(--line);border-radius:10px;background:var(--surface);
   padding:10px;display:flex;flex-direction:column;gap:8px}
-.vtree{overflow:auto;flex:1;min-height:120px;max-height:min(60vh,560px)}
+.vtree{overflow:auto;flex:1;min-height:120px}
 #vstruct{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
-#vsers{border-bottom:1px solid var(--line);padding-bottom:7px}
+#vsers{border-bottom:1px solid var(--line);padding-bottom:7px;max-height:40%;
+  display:flex;flex-direction:column;min-height:0}
+#vserlist{overflow:auto}   /* seventeen series must not push the structures off the screen */
 .vsh{font-family:var(--sans);font-size:11.5px;color:var(--faint);padding:0 4px 5px}
 .vsrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;
   padding:4px 6px;border-radius:5px;font-family:var(--sans);font-size:13px;
@@ -332,8 +338,10 @@ body.wide main>#view{max-width:none}
   stroke:rgba(0,0,0,.65);stroke-width:1.6px}
 /* .hide is a single class and loses to the rules above on specificity */
 .vstage img.hide,.vstage canvas.hide{display:none}
-.vbusy{position:absolute;top:9px;right:12px;color:#fff;opacity:.7;font-size:12px;
-  font-family:var(--sans)}
+.vbusy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#fff;opacity:.7;font-size:12px;font-family:var(--sans);pointer-events:none}
+.vbusy.hide{display:none}   /* .hide comes earlier in the sheet, so display:flex beat it */
+.busy{flex-grow:1;display:flex;align-items:center;justify-content:center}
 .vempty{color:var(--faint);font-family:var(--sans);font-size:13px;padding:8px 4px}
 .v3d{border:0;border-radius:8px;image-rendering:auto;max-width:none;display:block;
   cursor:grab;touch-action:none}
@@ -483,7 +491,65 @@ const ROUTES = {
   project: (a) => project(a[0]),
   fossa:   (a) => fossa(a[0], a[1]),
   viewseg: (a) => viewseg(a[0], a[1], a[2]),
+  /* A run and a series read are screens like any other, so they have an address like
+     any other. Both are rebuilt from the server rather than from whatever variable
+     happened to still be in scope, which is what makes leaving and coming back - or a
+     reload, or the back button - land on the screen you left. */
+  run:     (a) => resume(a[0], a[1], running),
+  series:  (a) => resume(a[0], a[1], (n, r) =>
+                    series(n, r.jobs[0], r.resume.plan, r.resume.cases)),
 };
+
+/* The jobs of a run, and whatever the screen watching it was opened with. */
+async function resume(name, runId, draw) {
+  view.innerHTML = "";
+  let r;
+  try { r = await api("/api/resume?id=" + encodeURIComponent(runId)); }
+  catch (e) {
+    /* The server was restarted, or the run is older than what it keeps. Say so and
+       offer the only thing left to do, rather than a blank screen. */
+    view.append($(`<div class="reading"><h1>That run is over</h1>
+      <p class="sub">The server no longer has it. Whatever it wrote is on the
+      project screen.</p></div>`));
+    const b = $(`<button style="margin-top:14px">Back to project</button>`);
+    b.onclick = () => nav("project", name);
+    view.querySelector(".reading").append(b);
+    return;
+  }
+  draw(name, r);
+}
+/* A scrollbox at the bottom of a screen gets the rest of the window, measured.
+   Every constant tried here - 52vh, 66vh, 46vh, 620px, 420px - was wrong on some
+   monitor, and always wrong the same way: a band of content with the screen empty
+   under it. `below` is whatever sits beneath, measured too, so the box stops just
+   above it. `off` turns the whole thing off, for a narrow layout that stacks and
+   wants the page to scroll instead. */
+function fitToWindow(el, {min = 220, gap = 24, below = null, off = null,
+                          exact = false} = {}) {
+  const fit = () => {
+    if (!document.body.contains(el)) return removeEventListener("resize", fit);
+    if (off && off()) { el.style.height = ""; el.style.maxHeight = ""; return; }
+    const b = below && below();
+    /* The running bar is fixed to the bottom and holds its space with padding on the
+       body, which does not shrink innerHeight - so measuring against the window alone
+       put the last rows underneath it. */
+    const pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+    const r = el.getBoundingClientRect();
+    /* Margins count too - the box's own (the case list's 6px) and any between it and
+       what sits below (the run bar's 16px top margin) - so the space below is measured
+       edge to edge rather than as the height of the thing under it. */
+    const own = parseFloat(getComputedStyle(el).marginBottom) || 0;
+    const under = b ? b.getBoundingClientRect().bottom - r.bottom : own;
+    const room = innerHeight - r.top - pad - gap - under;
+    const h = Math.max(min, room) + "px";
+    el.style.maxHeight = h;
+    if (exact) el.style.height = h;     /* a grid needs a height, not a ceiling */
+  };
+  fit();
+  addEventListener("resize", fit);
+  return fit;
+}
+
 function nav(v, ...args) {
   const h = "#" + [v].concat(args.map(encodeURIComponent)).join("/");
   if (location.hash === h) route();      /* same screen: re-render, no history entry */
@@ -521,7 +587,7 @@ function route() {
      many, so this one steps back to the rail while you are in there */
   if (v === "viewseg" && !SET.rail) document.body.classList.add("railed");
   else document.body.classList.toggle("railed", SET.rail);
-  paintSidebar(v === "project" || v === "fossa" || v === "viewseg" || v === "add"
+  paintSidebar(["project", "fossa", "viewseg", "add", "run", "series"].includes(v)
                ? parts[0] : "");
   /* leaving the job screen, so the running bar becomes the way back to it */
   LIVE_ON = false;
@@ -846,22 +912,22 @@ async function project(name) {
     <section class="pane hide" data-t="run">
       <div class="runcols">
         <div>
-          <div class="lbl">Structures</div>
+          <div class="lbl">Segment</div>
           <div class="row" style="margin-bottom:8px">
-            <input type="search" id="q" placeholder="Search 40 structures…">
+            <input type="search" id="q">
           </div>
           <div class="tasklist" id="tl"></div>
           <div id="lic"></div>
         </div>
         <div>
-          <div class="lbl">Analyses</div>
+          <div class="lbl">Measure</div>
           <div class="tasklist" id="al"></div>
           <label class="ui meta" style="display:block;margin-top:12px">
             <input type="checkbox" id="force"> Re-run cases that are already done</label>
         </div>
       </div>
       <div class="row runbar">
-        <button id="run">Start segmenting</button>
+        <button id="run">Start</button>
         <button class="ghost" id="scan">Check series first</button>
       </div>
       <div id="runerr"></div>
@@ -877,6 +943,8 @@ async function project(name) {
     view.querySelectorAll("#ptabs .tab").forEach(x => x.classList.toggle("on", x === b));
     view.querySelectorAll(".pane").forEach(x =>
       x.classList.toggle("hide", x.dataset.t !== b.dataset.t));
+    /* a hidden pane measures as nothing, so its boxes are sized when it is shown */
+    dispatchEvent(new Event("resize"));
   };
 
   editableText(document.getElementById("desc"), {
@@ -913,11 +981,13 @@ async function project(name) {
     const tr = $(`<tr id="row-${esc(c.case)}">
       <td><input type="checkbox" class="ck" ${c.skipped ? "" : "checked"}
         value="${esc(c.case)}"></td>
-      <td><b>${esc(c.case)}</b></td>
+      <td><b>${esc(c.case)}</b>
+        <button class="quiet skb">${c.skipped ? "put back" : "set aside"}</button></td>
       <td>${c.converted ? '<span class="pill on">yes</span>' : '<span class="pill">no</span>'}</td>
       <td>${c.tasks.length ? c.tasks.map(x=>`<span class="pill on">${esc(x)}</span>`).join("")
                            : '<span class="pill">none</span>'}</td>
-      <td>${c.skipped ? '<span class="pill amber">set aside</span>' : ''}
+      <td><span class="asidepill">${c.skipped
+            ? '<span class="pill amber">set aside</span>' : ''}</span>
           ${c.fossae ? '<span class="pill on">fossae</span>' : ''}
           ${c.linear ? '<span class="pill on">linear</span>' : ''}
           ${c.brain_icv ? '<span class="pill on">brain/ICV</span>' : ''}
@@ -929,7 +999,6 @@ async function project(name) {
         ${c.fossae ? '<button class="quiet rev">review fossa</button>' : ''}
         ${c.tasks.length || c.fossae || c.brain_icv
           ? '<button class="quiet sif" title="open this case\'s output folder">show in folder</button>' : ''}
-        ${c.skipped ? '<button class="quiet unsk">put back</button>' : ''}
       </td>
     </tr>`);
     editableText(tr.querySelector(".casenote"), {
@@ -942,12 +1011,25 @@ async function project(name) {
     if (rev) rev.onclick = () => nav("fossa", name, c.case);
     const sif = tr.querySelector(".sif");
     if (sif) sif.onclick = (ev) => reveal(name, c.case, "", null, ev.currentTarget);
-    const unsk = tr.querySelector(".unsk");
-    if (unsk) unsk.onclick = async (ev) => {
-      pending(ev.currentTarget, "Putting back…");
-      try { await api("/api/project/skip", {project:name, case:c.case, skip:false});
-            nav("project", name); }
-      catch (e) { document.getElementById("runerr").append(err(e)); }
+    /* Set aside and put back are the same switch, so they are one button that says
+       which way it is about to go. The row is updated where it stands rather than the
+       screen being drawn again: on a project of six hundred cases a redraw to change
+       one word costs a visible pause and loses where you were scrolled to. */
+    const skb = tr.querySelector(".skb");
+    skb.onclick = async (ev) => {
+      const to = !c.skipped;
+      const undo = pending(ev.currentTarget, to ? "Setting aside…" : "Putting back…");
+      try {
+        await api("/api/project/skip", {project:name, case:c.case, skip:to});
+        c.skipped = to;
+        tr.querySelector(".asidepill").innerHTML =
+          to ? '<span class="pill amber">set aside</span>' : "";
+        /* A case set aside is one the next run should leave alone, so the tick follows
+           the switch - which is what it does when the screen is drawn from scratch. */
+        tr.querySelector(".ck").checked = !to;
+        tally();
+      } catch (e) { document.getElementById("runerr").append(err(e)); }
+      finally { undo(); skb.textContent = c.skipped ? "put back" : "set aside"; }
     };
     tbl.querySelector("tbody").append(tr);
   }
@@ -955,13 +1037,7 @@ async function project(name) {
   /* Fill the window rather than a guessed fraction of it: 52vh left the bottom half of
      a tall monitor empty, and any constant here is wrong for a two-line description or
      a project with an offline-cases warning. Measured instead. */
-  const fitCases = () => {
-    if (!document.body.contains(cases)) return removeEventListener("resize", fitCases);
-    cases.style.maxHeight =
-      Math.max(220, innerHeight - cases.getBoundingClientRect().top - 24) + "px";
-  };
-  fitCases();
-  addEventListener("resize", fitCases);
+  fitToWindow(cases);
 
   /* Header checkbox drives the column, and follows it back: clearing one row should
      leave the header showing "some", not a lie in either direction. */
@@ -1012,6 +1088,7 @@ async function project(name) {
         <input type="checkbox" class="task" value="${esc(task.name)}"
           ${chosenT.has(task.name) ? "checked" : ""}>
         <span><span class="tname">${esc(task.name)}</span>
+          ${task.model ? `<span class="pill">${esc(task.model)}</span>` : ''}
           ${task.licensed ? '<span class="pill amber">license</span>' : ''}
           ${doneTasks.has(task.name) ? '<span class="pill on">done</span>' : ''}
           <div class="tblurb">${esc(task.blurb || "")}</div></span></label>`));
@@ -1022,9 +1099,13 @@ async function project(name) {
     });
   };
   draw("");
+  document.getElementById("q").placeholder = `Search ${t.tasks.length} structures…`;
   document.getElementById("q").oninput = (e) => draw(e.target.value);
 
   const al = document.getElementById("al");
+  const runbar = () => document.querySelector('[data-t="run"] .runbar');
+  for (const box of [document.getElementById("tl"), al])
+    fitToWindow(box, {min: 180, below: runbar});
   for (const [k, a] of Object.entries(t.analyses)) {
     al.append($(`<label><input type="checkbox" class="anal" value="${esc(k)}">
       <span><span class="tname">${esc(a.label)}</span>
@@ -1053,7 +1134,7 @@ async function project(name) {
       /* A case with a recorded choice is answered from that choice, as the command
          line does. Re-read on its card reads the series again for that one. */
       const {job} = await api("/api/scan", {project:name, cases:cs, quick:true});
-      series(name, job, null, cs);
+      nav("series", name, job);
     } catch (e) { undo(); document.getElementById("runerr").append(err(e)); }
   };
 
@@ -1079,9 +1160,10 @@ async function project(name) {
       /* quick: a case with a recorded choice is answered from that choice instead of
          every series being read again, which is why the command line starts at once on
          a study it has seen before. Check series first asks for the full read. */
-      const {job} = await api("/api/scan", {project:name, cases:cs, quick:true});
+      const {job} = await api("/api/scan",
+        {project:name, cases:cs, quick:true, plan});
       undo();
-      return series(name, job, plan, cs);
+      return nav("series", name, job);
     } catch (e) { undo(); box.append(err(e)); }
   };
 
@@ -1238,7 +1320,9 @@ function liveBar() {
   const bar = document.getElementById("live");
   const on = LIVE.length > 0 && !LIVE_ON;
   bar.classList.toggle("on", on);
+  const was = document.body.classList.contains("livebar");
   document.body.classList.toggle("livebar", on);
+  if (was !== on) dispatchEvent(new Event("resize"));   /* the room just changed */
 }
 
 async function watchLive() {
@@ -1253,7 +1337,12 @@ async function watchLive() {
         ? `${esc(first.project)} &mdash; queued`
         : `${esc(first.project)} &mdash; ${esc(first.label)} &middot; step ${first.step} of ${first.steps}`
           + (first.step_label ? ` &middot; <b>${esc(first.step_label)}</b>` : "")) + n;
-    document.getElementById("liveView").onclick = () => running(first.project, LIVE.slice());
+    /* Where this job is watched from, as the job itself says - a scan belongs to the
+       series screen, a segmentation to the run screen. The old version always opened
+       the run screen, and always with only the jobs still going, so coming back to a
+       run that was half done showed the half. */
+    document.getElementById("liveView").onclick = () =>
+      nav(first.view[0], first.project, ...first.view.slice(1));
     document.getElementById("liveStop").onclick = async (ev) => {
       const undo = pending(ev.currentTarget, "Stopping…");
       for (const id of LIVE.slice()) { try { await api("/api/job/cancel", {id}); } catch {} }
@@ -1283,7 +1372,8 @@ async function follow(id, onTick) {
   });
 }
 
-function running(name, jobs) {
+function running(name, r) {
+  const jobs = Array.isArray(r) ? r : r.jobs;
   stopPoll(); crumb.textContent = name + " · running";
   LIVE_ON = true; liveBar();   /* this screen is the bar, so the bar stands down */
   view.innerHTML = "";
@@ -1306,6 +1396,9 @@ function running(name, jobs) {
     <div id="log" class="hide"></div>
     <div id="doneline"></div></div>`));
   const log = g("log"), steps = g("steps");
+  /* The terminal output and the finish button sit under the steps, so they are what
+     the list has to stop above - and the log only appears once it is switched on. */
+  fitToWindow(steps, {min: 160, below: () => g("showlog").closest("label")});
   g("showlog").onchange = (e) => {
     log.classList.toggle("hide", !e.target.checked);
     if (e.target.checked) log.scrollTop = log.scrollHeight;
@@ -1439,6 +1532,15 @@ async function series(name, job, plan, cases) {
     </div></div>`));
   g("doneb").onclick = () => nav("project", name);
 
+  const wrap = g("stage").closest(".serwrap");
+  fitToWindow(wrap, {
+    min: 320, exact: true,
+    below: () => wrap.parentElement.querySelector(".runbar"),
+    /* under 900px the two panes stack and the page scrolls, so a fixed height would
+       squash them both - that is what the stylesheet's own rule is for */
+    off: () => innerWidth <= 900,
+  });
+
   const stage = g("stage"), qlist = g("qlist"), snote = g("snote");
   const results = {};                   /* case -> what the scan found for it */
   const rows = {};                      /* case -> its row in the queue */
@@ -1490,7 +1592,7 @@ async function series(name, job, plan, cases) {
     if (go) {
       go.disabled = unresolved.size > 0;
       go.textContent = unresolved.size
-        ? unresolved.size + " still need a series" : "Start segmenting";
+        ? unresolved.size + " still need a series" : "Start";
     }
     const n = order().length;
     g("qtally").textContent = unresolved.size
@@ -1517,7 +1619,7 @@ async function series(name, job, plan, cases) {
   function drawStage() {
     stage.innerHTML = "";
     if (!at) {
-      stage.append($(`<div class="meta"><span class="spin dark"></span>reading the
+      stage.append($(`<div class="meta busy"><span class="spin dark"></span>reading the
         scans…</div>`));
       return;
     }
@@ -1543,7 +1645,7 @@ deleted and your series choice is kept; untick to bring it back."
     });
 
     if (!r) {
-      stage.append($(`<div class="meta"><span class="spin dark"></span>reading…</div>`));
+      stage.append($(`<div class="meta busy"><span class="spin dark"></span>reading…</div>`));
       return;
     }
     if (r.error) { stage.append($(`<div class="note warn">${esc(r.error)}</div>`)); return; }
@@ -1722,7 +1824,7 @@ deleted and your series choice is kept; untick to bring it back."
         if (undo) undo(); return;
       }
       const r = await api("/api/run", go);
-      running(name, r.jobs);
+      nav("run", name, r.run);
     } catch (e) { if (undo) undo(); snote.append(err(e)); }
   }
   if (g("go")) g("go").onclick = (ev) => launch(ev.currentTarget);
@@ -2460,6 +2562,7 @@ async function viewseg(name, cse, focus) {
   g("vraw").hidden = !rawOnly;
   g("vwrap").classList.remove("hide");
   for (const w of st.warnings || []) g("vhead").append($(`<div class="note amber">${esc(w)}</div>`));
+  fitToWindow(document.querySelector(".vside"), {exact: true});   /* after what sits above it */
 
   const PL = ["axial", "coronal", "sagittal"];
   const S = {plane: "axial", mode: "2d", idx: {}, op: 45, op3: 100,
