@@ -2411,6 +2411,36 @@ class Handler(BaseHTTPRequestHandler):
                 save_project(pr)
                 return self._json({"note": text})
 
+            if u.path == "/api/project/rename":
+                # The whole project is one folder and nothing inside it names it, so a
+                # rename is moving that folder. Refused while a run is going: its steps
+                # already hold the old paths.
+                name = self._project(body)
+                new = (body.get("new") or "").strip()
+                if new == name:
+                    return self._json({"name": name})
+                if not SAFE_NAME.match(new):
+                    return self._json({"error": "letters, numbers, spaces, - . _ only"}, 400)
+                # a change of case only is the same folder on Windows, not a clash
+                if (PROJECTS / new).exists() and new.lower() != name.lower():
+                    return self._json({"error": "a project with that name exists"}, 400)
+                with LOCK:
+                    busy = any(j.project == name and j.state in ("queued", "running")
+                               for j in JOBS.values())
+                if busy:
+                    return self._json({"error": f"{name} has a run going - let it finish "
+                                                "or stop it first"}, 400)
+                try:
+                    (PROJECTS / name).rename(PROJECTS / new)
+                except OSError as e:
+                    return self._json({"error": f"could not rename it ({e.strerror}) - "
+                                                "close anything that has one of its files "
+                                                "open, then try again"}, 400)
+                pr = load_project(new)
+                pr["name"] = new
+                save_project(pr)
+                return self._json({"name": new})
+
             if u.path == "/api/project/describe":
                 name = self._project(body)
                 pr = load_project(name)

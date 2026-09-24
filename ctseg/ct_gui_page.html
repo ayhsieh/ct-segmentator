@@ -203,6 +203,7 @@ canvas{border:1px solid var(--line);border-radius:6px;cursor:crosshair;
    affordance has to arrive on hover: a tinted panel, an underline and a pencil. The
    padding is cancelled by an equal negative margin and the underline is present but
    transparent at rest, so none of it moves the text when it appears. */
+h1 input{font:inherit;letter-spacing:inherit}   /* the name, edited in place, at its own size */
 .editable{cursor:text;display:inline-block;max-width:100%;
   padding:2px 7px;margin:-2px -7px;border-radius:6px;
   border-bottom:1px dashed transparent;transition:background .12s,border-color .12s}
@@ -462,8 +463,10 @@ function editableText(host, opt) {
       if (closed) return; closed = true;
       const v = i.value.trim();
       if (!keep || v === text) return rest();
+      const was = text;
       text = v; rest();
-      try { await opt.save(v); } catch (e) { host.append(err(e)); }
+      try { await opt.save(v); }
+      catch (e) { text = was; rest(); host.append(err(e)); }
     };
     i.onkeydown = (e) => { if (e.key === "Enter") save(true);
                            else if (e.key === "Escape") save(false); };
@@ -879,7 +882,7 @@ async function project(name) {
   view.append($(`<div>
     <div class="phead">
       <div>
-        <h1>${esc(name)}</h1>
+        <h1 id="pname"></h1>
         <div id="desc"></div>
       </div>
       <div class="row" style="margin-left:auto">
@@ -947,6 +950,15 @@ async function project(name) {
     dispatchEvent(new Event("resize"));
   };
 
+  /* Renamed the way the description is edited: click it, type, Enter. */
+  editableText(g("pname"), {
+    value: name, placeholder: name, width: 520,
+    save: async (v) => {
+      const r = await api("/api/project/rename", {project: name, new: v});
+      sidebarStale();
+      nav("project", r.name);
+    },
+  });
   editableText(document.getElementById("desc"), {
     value: st.description || "",
     placeholder: "Add a description",
