@@ -47,6 +47,17 @@ def _project(group):
         return {}
 
 
+def slice_axis(zooms):
+    """Which of a scan's three axes its slices run along: the one spaced widest.
+
+    The converted scan is always stored head-up, so a coronal or sagittal acquisition
+    has its slices on another axis than the third - and reading the third one gave the
+    in-plane pixel size as the spacing and the image width as the slice count. A tie,
+    an isotropic scan, keeps the third, which is where an axial one has them.
+    """
+    return max(range(3), key=lambda i: (round(float(zooms[i]), 3), i == 2))
+
+
 def project_cases(group):
     """Every case the project lists, in the order it lists them.
 
@@ -229,9 +240,11 @@ def main():
             rows[case]["series_name"] = "".join(parts[2:])[: -len(".nii.gz")]
         try:
             img = nib.load(str(files[0]))
-            rows[case]["num_slices"] = img.shape[2]
+            z = img.header.get_zooms()[:3]
+            ax = slice_axis(z)
+            rows[case]["num_slices"] = img.shape[ax]
             # centre to centre; equal to the thickness unless the slices overlap
-            rows[case]["slice_spacing_mm"] = round(float(img.header.get_zooms()[2]), 3)
+            rows[case]["slice_spacing_mm"] = round(float(z[ax]), 3)
         except Exception:
             rows[case]["num_slices"] = None
 

@@ -37,4 +37,10 @@ with tempfile.TemporaryDirectory() as tmp:
     assert produce_table.project_cases("cli") == []
     assert produce_table.case_notes("cli") == {}
 
+# the slice axis: axial, coronal, sagittal, and isotropic (which keeps the third)
+assert produce_table.slice_axis((0.5, 0.5, 5.0)) == 2
+assert produce_table.slice_axis((0.34, 2.0, 0.34)) == 1      # the coronal controls
+assert produce_table.slice_axis((3.0, 0.45, 0.45)) == 0
+assert produce_table.slice_axis((0.75, 0.75, 0.75)) == 2
+
 print("table rows: ok")
