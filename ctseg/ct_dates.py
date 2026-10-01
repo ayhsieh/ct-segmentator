@@ -94,3 +94,30 @@ def study_date(group, case, limit=400, case_dir=None):
         return date, f"no series chosen; folder holds {len(seen)} dates: " + \
                      ", ".join(sorted(seen))
     return date, "no series chosen; read from the folder"
+
+
+def slice_thickness(group, case):
+    """SliceThickness of the chosen series, in mm, or None.
+
+    Only ever from the series that was chosen. A case folder can hold a 0.75 mm and a
+    5 mm reconstruction of the same scan, and a number guessed from the folder would
+    go into a methods table as if it were known. Here rather than in its own module
+    because it reads the same header of the same series the study date does.
+    """
+    import pydicom
+    series = _recorded_series(group, case_dir_for(group, case))
+    if series is None:
+        return None
+    for f in sorted(series.iterdir()):
+        if not f.is_file():
+            continue
+        try:
+            ds = pydicom.dcmread(str(f), stop_before_pixels=True,
+                                 specific_tags=["SliceThickness"])
+        except Exception:
+            continue
+        try:
+            return round(float(ds.SliceThickness), 3)   # one slice speaks for the series
+        except (AttributeError, TypeError, ValueError):
+            return None
+    return None

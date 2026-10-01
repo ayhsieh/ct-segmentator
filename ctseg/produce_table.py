@@ -31,7 +31,7 @@ import json
 import os
 import pathlib
 
-from ctseg.ct_dates import study_date
+from ctseg.ct_dates import slice_thickness, study_date
 from ctseg.ct_paths import group_dir, seg_dir_for, nifti_dir_for
 
 
@@ -212,6 +212,7 @@ def main():
         # cohort that had simply not been run yet.
         if d and note:
             rows[case]["study_date_note"] = note
+        rows[case]["slice_thickness_mm"] = slice_thickness(args.group, case)
         nifti_case_dir = nifti_dir / case
         if not nifti_case_dir.is_dir():
             continue
@@ -227,7 +228,10 @@ def main():
                 pass
             rows[case]["series_name"] = "".join(parts[2:])[: -len(".nii.gz")]
         try:
-            rows[case]["num_slices"] = nib.load(str(files[0])).shape[2]
+            img = nib.load(str(files[0]))
+            rows[case]["num_slices"] = img.shape[2]
+            # centre to centre; equal to the thickness unless the slices overlap
+            rows[case]["slice_spacing_mm"] = round(float(img.header.get_zooms()[2]), 3)
         except Exception:
             rows[case]["num_slices"] = None
 
@@ -236,8 +240,11 @@ def main():
     # cases - the same order the Cases tab shows.
     df = pd.DataFrame.from_dict(rows, orient="index").reindex(cases)
     df.index.name = "case"
-    if "note" in df.columns:          # next to the name it belongs to, not at the end
-        df = df[["note"] + [c for c in df.columns if c != "note"]]
+    # The note next to the name it belongs to, then the scan's own details together,
+    # then the measurements - whatever order the rows happened to fill them in.
+    first = ["note", "study_date", "study_date_note", "series_num", "series_name",
+             "num_slices", "slice_thickness_mm", "slice_spacing_mm"]
+    df = df[[c for c in first if c in df.columns] + [c for c in df.columns if c not in first]]
     out = args.out or str(total_dir / f"{args.group}_structure_volumes_ml.csv")
     df.to_csv(out)
     print(f"{len(cases)} case(s) -> {out}")

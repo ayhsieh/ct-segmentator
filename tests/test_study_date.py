@@ -17,8 +17,8 @@ import tempfile
 from pathlib import Path
 
 
-def dicom(path, date):
-    """The smallest file pydicom will read a StudyDate out of."""
+def dicom(path, date, thickness=None):
+    """The smallest file pydicom will read a StudyDate (and SliceThickness) out of."""
     import pydicom
     from pydicom.dataset import FileDataset, FileMetaDataset
     from pydicom.uid import ExplicitVRLittleEndian
@@ -29,6 +29,8 @@ def dicom(path, date):
     meta.TransferSyntaxUID = ExplicitVRLittleEndian
     ds = FileDataset(str(path), {}, file_meta=meta, preamble=b"\0" * 128)
     ds.StudyDate = date
+    if thickness is not None:
+        ds.SliceThickness = thickness
     path.parent.mkdir(parents=True, exist_ok=True)
     ds.save_as(str(path), enforce_file_format=True)
 
@@ -57,10 +59,12 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # two studies exported into one case folder, and the chosen one is series 5
     both = root / "study" / "scans" / "CASE3"
-    dicom(both / "s3" / "1.dcm", "20250101")
-    dicom(both / "s5" / "1.dcm", "20250909")
+    dicom(both / "s3" / "1.dcm", "20250101", thickness=5.0)
+    dicom(both / "s5" / "1.dcm", "20250909", thickness=0.75)
     d, note = ct_dates.study_date("study", "CASE3")
     assert note.startswith("no series chosen"), note     # honest about guessing
+    # two reconstructions, nothing chosen: no thickness rather than a guess
+    assert ct_dates.slice_thickness("study", "CASE3") is None
 
     ct_paths.save_cache("study", {
         ct_paths.anchored(both, "study"): {"snum": 5,
@@ -68,5 +72,6 @@ with tempfile.TemporaryDirectory() as tmp:
     })
     d, note = ct_dates.study_date("study", "CASE3")
     assert (d, note) == ("2025-09-09", ""), (d, note)    # was the folder's guess
+    assert ct_dates.slice_thickness("study", "CASE3") == 0.75   # the chosen one's
 
 print("study_date: ok")
