@@ -181,7 +181,36 @@ def resolve_from_cache(entry, dicom_folder, group):
     series_dir = unanchored(entry["series_dir"], group)
     if not series_dir.is_dir():
         return None, None, None
-    files = [str(f) for f in series_dir.iterdir() if f.is_file()]
+    files = sorted(str(f) for f in series_dir.iterdir() if f.is_file())
+    files = _only_series(files, entry["snum"])
     if not files:
         return None, None, None
     return files, entry.get("desc", ""), entry["snum"]
+
+
+def _only_series(files, snum):
+    """The recorded series' own files, out of a folder that may hold the whole study.
+
+    A choice is recorded as a folder and a series number. Most exports give each series
+    a folder, but some put every series of the study in one (a PACS disc's DICOMOBJ),
+    and taking that folder whole handed the converter every series at once.
+
+    ponytail: checks the first and last file before reading them all, so a folder of
+    one series costs two reads, not hundreds. A mixed folder whose two ends both belong
+    to the chosen series would slip through; read every file if that ever turns up.
+    """
+    import pydicom
+
+    def number(f):
+        try:
+            return str(pydicom.dcmread(f, stop_before_pixels=True,
+                                       specific_tags=["SeriesNumber"]).SeriesNumber)
+        except Exception:
+            return None
+
+    # only a file that says it belongs to another series is left out; one that says
+    # nothing is passed on as it always was
+    ok = (str(snum), None)
+    if not files or (number(files[0]) in ok and number(files[-1]) in ok):
+        return files
+    return [f for f in files if number(f) in ok]

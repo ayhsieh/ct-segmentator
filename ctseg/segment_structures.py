@@ -272,26 +272,53 @@ def one_reconstruction(files):
     sees a volume that changes slice spacing halfway down.
 
     Thin is what the measurements want and what the series scorer already prefers, so
-    the coarser copy is dropped. Returns `files` untouched when there is only one.
+    the coarser copy is dropped.
+
+    The other way one series holds two copies is a retake: the same range scanned
+    again a few seconds later, every slice position twice, told apart only by the
+    acquisition number. The converter takes the repeated positions for a time series
+    and fails asking for MRI timing. A scan is repeated because the first one was not
+    usable - in a child, usually movement - so the later one is kept. Only when every
+    position repeats: a scan taken in two halves has two acquisitions too, and both
+    halves are the scan.
+
+    Returns `files` untouched when there is only one copy.
     """
-    by_thickness = defaultdict(list)
+    by_thickness, info = defaultdict(list), {}
     for f in files:
         try:
             ds = pydicom.dcmread(f, stop_before_pixels=True,
-                                 specific_tags=["SliceThickness"])
+                                 specific_tags=["SliceThickness", "AcquisitionNumber",
+                                                "ImagePositionPatient"])
             t = round(float(ds.SliceThickness), 3)
         except Exception:
-            t = None
+            ds, t = None, None
         by_thickness[t].append(f)
-    if len(by_thickness) < 2:
-        return files
-    real = [t for t in by_thickness if t]
-    keep = min(real) if real else None
-    dropped = sum(len(v) for t, v in by_thickness.items() if t != keep)
-    print(f"  This folder holds more than one reconstruction: "
-          f"{ {t: len(v) for t, v in by_thickness.items()} }. "
-          f"Converting the {keep} mm one, leaving {dropped} slice(s).")
-    return by_thickness[keep]
+        if ds is not None:
+            pos = getattr(ds, "ImagePositionPatient", None)
+            info[f] = (getattr(ds, "AcquisitionNumber", None),
+                       tuple(round(float(v), 2) for v in pos) if pos else None)
+    if len(by_thickness) > 1:
+        real = [t for t in by_thickness if t]
+        keep = min(real) if real else None
+        dropped = sum(len(v) for t, v in by_thickness.items() if t != keep)
+        print(f"  This folder holds more than one reconstruction: "
+              f"{ {t: len(v) for t, v in by_thickness.items()} }. "
+              f"Converting the {keep} mm one, leaving {dropped} slice(s).")
+        files = by_thickness[keep]
+
+    by_acq = defaultdict(set)
+    for f in files:
+        acq, pos = info.get(f, (None, None))
+        by_acq[acq].add(pos)
+    covers = list(by_acq.values())
+    if len(by_acq) > 1 and None not in by_acq and all(c == covers[0] for c in covers):
+        last = max(by_acq, key=lambda a: int(a))
+        print(f"  This series holds {len(by_acq)} scans of the same range "
+              f"(acquisitions {sorted(int(a) for a in by_acq)}) - a retake. "
+              f"Converting acquisition {last}, the later one.")
+        files = [f for f in files if info.get(f, (None,))[0] == last]
+    return files
 
 
 def why_convert_failed(series_dir, exc, limit=300):

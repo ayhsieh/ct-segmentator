@@ -18,13 +18,19 @@ from pydicom.uid import ExplicitVRLittleEndian
 from ctseg.segment_structures import one_reconstruction
 
 
-def slice_at(path, thickness):
+def slice_at(path, thickness, acq=None, z=None, series=None):
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
     meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
     meta.TransferSyntaxUID = ExplicitVRLittleEndian
     ds = FileDataset(str(path), {}, file_meta=meta, preamble=b"\0" * 128)
     ds.SliceThickness = thickness
+    if acq is not None:
+        ds.AcquisitionNumber = acq
+    if z is not None:
+        ds.ImagePositionPatient = [0.0, 0.0, float(z)]
+    if series is not None:
+        ds.SeriesNumber = series
     path.parent.mkdir(parents=True, exist_ok=True)
     ds.save_as(str(path), enforce_file_format=True)
     return str(path)
@@ -55,5 +61,33 @@ with tempfile.TemporaryDirectory() as tmp:
         str(noth), enforce_file_format=True)
     kept = one_reconstruction(odd + [str(noth)])
     assert set(kept) == set(odd), kept
+
+    # a retake: the same range scanned twice, one acquisition after the other - the
+    # later one is the scan, and the first is left out whole
+    first = [slice_at(d / "retake" / f"a{i}.dcm", 0.6, acq=1, z=i) for i in range(10)]
+    again = [slice_at(d / "retake" / f"b{i}.dcm", 0.6, acq=2, z=i) for i in range(10)]
+    assert set(one_reconstruction(first + again)) == set(again)
+
+    # a scan taken in two halves also has two acquisitions; both halves are kept
+    top = [slice_at(d / "halves" / f"a{i}.dcm", 0.6, acq=1, z=i) for i in range(10)]
+    low = [slice_at(d / "halves" / f"b{i}.dcm", 0.6, acq=2, z=10 + i) for i in range(10)]
+    assert len(one_reconstruction(top + low)) == 20
+
+    # a PACS export with every series in one folder: reading a choice back takes only
+    # that series, not the scout and the dose report filed beside it
+    import os
+    os.environ["CT_DATA_ROOT"] = str(d)
+    from ctseg import ct_paths
+    ct_paths.DATA_ROOT = d
+    flat = d / "proj" / "scans" / "CASE" / "DICOMOBJ"
+    for i in range(2):
+        slice_at(flat / f"0000{i}", 5.0, series=1)
+    for i in range(10):
+        slice_at(flat / f"001{i}", 0.6, series=2)
+    for i in range(3):
+        slice_at(flat / f"009{i}", 5.0, series=3)
+    entry = {"snum": "2", "series_dir": "scans/CASE/DICOMOBJ"}
+    files, _, snum = ct_paths.resolve_from_cache(entry, flat.parent, "proj")
+    assert len(files) == 10 and snum == "2", len(files)
 
 print("one reconstruction: ok")

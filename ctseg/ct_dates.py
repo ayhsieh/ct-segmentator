@@ -12,7 +12,7 @@ import os
 from collections import Counter
 from pathlib import Path
 
-from ctseg.ct_paths import cache_get, case_dir_for, load_cache, unanchored
+from ctseg.ct_paths import cache_get, case_dir_for, load_cache, resolve_from_cache, unanchored
 
 DATE_TAGS = ["StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate"]
 
@@ -105,12 +105,10 @@ def slice_thickness(group, case):
     because it reads the same header of the same series the study date does.
     """
     import pydicom
-    series = _recorded_series(group, case_dir_for(group, case))
-    if series is None:
-        return None
-    for f in sorted(series.iterdir()):
-        if not f.is_file():
-            continue
+    d = case_dir_for(group, case)
+    # the chosen series' own files - its folder may hold every series of the study
+    files, _, _ = resolve_from_cache(cache_get(load_cache(group), d, group), d, group)
+    for f in files or ():
         try:
             ds = pydicom.dcmread(str(f), stop_before_pixels=True,
                                  specific_tags=["SliceThickness"])
