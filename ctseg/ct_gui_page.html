@@ -529,8 +529,16 @@ async function resume(name, runId, draw) {
    wants the page to scroll instead. */
 function fitToWindow(el, {min = 220, gap = 24, below = null, off = null,
                           exact = false} = {}) {
+  /* Re-measured whenever the screen around it changes size, not only on a window
+     resize: a note added above after the screen opened pushed the box, and whatever
+     sits under it, off the bottom. Setting the same height again is not a change, so
+     this settles after one pass. */
+  const watch = new ResizeObserver(() => fit());
   const fit = () => {
-    if (!document.body.contains(el)) return removeEventListener("resize", fit);
+    if (!document.body.contains(el)) {
+      watch.disconnect();
+      return removeEventListener("resize", fit);
+    }
     if (off && off()) { el.style.height = ""; el.style.maxHeight = ""; return; }
     const b = below && below();
     /* The running bar is fixed to the bottom and holds its space with padding on the
@@ -550,6 +558,7 @@ function fitToWindow(el, {min = 220, gap = 24, below = null, off = null,
   };
   fit();
   addEventListener("resize", fit);
+  if (el.parentElement) watch.observe(el.parentElement);
   return fit;
 }
 
