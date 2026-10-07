@@ -260,6 +260,14 @@ ANALYSES = {
         "needs": ["brain_structures"],
         "proofs": ["*fossae_simple.stats.json"],
     },
+    "cranial_index": {
+        "label": "Cranial index",
+        "blurb": "100 x skull width / length, both lines drawn in the viewer",
+        "script": "ctseg.segment_fossae",
+        "args": ["--linear-only"],
+        "needs": ["brain_structures"],
+        "proofs": ["*cranial_linear.stats.json"],
+    },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
@@ -1678,15 +1686,19 @@ def measurement_lines(group, case, shape, zooms, aff):
     import numpy as np
     from ctseg.produce_table import stats_files
     d = seg_dir_for(group) / case
+    # The fossa run and the cranial-index run both measure the outside; the newer one
+    # was measured by the newer code, so it is the one drawn.
     stats = None
-    for f in stats_files(d):
-        if not f.name.endswith("fossae_simple.stats.json"):
-            continue
+    found = [f for f in stats_files(d)
+             if f.name.endswith(("fossae_simple.stats.json", "cranial_linear.stats.json"))]
+    for f in sorted(found, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
             stats = json.loads(f.read_text())
         except Exception:
             continue
-        break
+        if (stats.get("outer_mm") or {}).get("points"):
+            break
+        stats = None
     pts = ((stats or {}).get("outer_mm") or {}).get("points") or {}
     if not pts:
         return []

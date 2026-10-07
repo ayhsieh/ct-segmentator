@@ -115,8 +115,10 @@ folder.
 **Start segmenting**. Names ending in `_mr` are for MRI, not CT. Sets marked **license**
 need a free academic number from
 [here](https://backend.totalsegmentator.com/license-academic/), pasted into the box that
-appears. Below the structures are two extra analyses, **cranial fossa volumes** and
-**brain and intracranial volume**, both needing `brain_structures` first. Anything
+appears. Below the structures are three extra analyses, **cranial fossa volumes**,
+**cranial index** and **brain and intracranial volume**, all needing `brain_structures`
+first. Cranial index is 100 x skull width (euryon to euryon) / length (glabella to
+opisthocranion); the viewer draws both lines. Anything
 already done is skipped unless you check **re-run even if done**.
 
 **Series selection.** A scan usually holds several reconstructions of the same
@@ -135,6 +137,7 @@ the next says **Queued**. Closing the browser doesn't stop it.
 - **All structure volumes** — every structure from every task, one row per patient
 - **Brain and ICV** — parenchyma and intracranial volume
 - **Cranial fossa volumes** — anterior, middle, posterior
+- **Cranial index** — width, length and the index, as `outer_` columns
 
 **Show in folder** opens any of them in Finder or Explorer. Segmentations are saved
 alongside as `.seg.nrrd`, which 3D Slicer opens directly.
