@@ -74,4 +74,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (d, note) == ("2025-09-09", ""), (d, note)    # was the folder's guess
     assert ct_dates.slice_thickness("study", "CASE3") == 0.75   # the chosen one's
 
+    # a project imported without its DICOMs: the date recorded on the case is used,
+    # and a DICOM date still wins where there is one
+    (root / "study" / "project.json").write_text(json.dumps({"cases": [
+        {"case": "GONE", "study_date": "2023-05-19"},
+        {"case": "CASE1", "study_date": "1999-01-01"}]}))
+    ct_dates._recorded_dates.cache_clear()
+    d, note = ct_dates.study_date("study", "GONE")
+    assert d == "2023-05-19" and note.startswith("recorded"), (d, note)
+    assert ct_dates.study_date("study", "CASE1")[0] == "2026-03-17"
+
 print("study_date: ok")

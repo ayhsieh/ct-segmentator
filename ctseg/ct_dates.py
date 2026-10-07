@@ -8,11 +8,14 @@ to reading the folder, and says so.
 Headers only, never pixel data, and pydicom rather than segment_structures so a CSV
 build does not load torch.
 """
+import json
 import os
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
-from ctseg.ct_paths import cache_get, case_dir_for, in_series, load_cache, pick_folder, unanchored
+from ctseg.ct_paths import (cache_get, case_dir_for, group_dir, in_series, load_cache,
+                            pick_folder, unanchored)
 
 DATE_TAGS = ["StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate"]
 
@@ -44,7 +47,28 @@ def _recorded_series(group, case_dir):
     return d if d.is_dir() else None
 
 
+@lru_cache(maxsize=None)
+def _recorded_dates(group):
+    """case -> study_date as written on the case in project.json.
+
+    For a project imported without its DICOMs (1000_controls: converted scans and
+    segmentations only), whose dates were read from the DICOMs before they left."""
+    try:
+        cases = json.loads((group_dir(group) / "project.json").read_text())["cases"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    return {c["case"]: c["study_date"] for c in cases if c.get("study_date")}
+
+
 def study_date(group, case, limit=400, case_dir=None):
+    """(date, note). The DICOMs win; a date recorded on the case is the fallback."""
+    d, note = _dicom_date(group, case, limit, case_dir)
+    if not d and case in _recorded_dates(group):
+        return _recorded_dates(group)[case], "recorded on the case, no DICOMs read"
+    return d, note
+
+
+def _dicom_date(group, case, limit=400, case_dir=None):
     """(date, note). The note is empty when the date came from the chosen series.
 
     case_dir is for callers that already know where the case is; everyone else gets
