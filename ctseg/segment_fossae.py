@@ -771,6 +771,8 @@ def hull_perimeter(pts):
 
 
 MIDLINE_MM = 5.0        # half-thickness of the slab that counts as the midsagittal plane
+FRONT_FLOOR_MM = 15.0   # the front of the brain space whose lowest point bounds glabella
+BRAINCASE_MM = 30.0     # furthest the outer table sits from the brain space (frontal sinus)
 
 
 # ---------------------------------------------- the midsagittal cut and its landmarks
@@ -1195,7 +1197,8 @@ def level_extremes(sel, along, l1, l2, step=3.0, least=8):
             int(sel[cell[int(np.argmax(a[cell]))]]))
 
 
-def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, base_h):
+def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, base_h,
+                       icv=None):
     """The skull measured from outside, to the craniometric definitions.
 
     Maximum cranial length is "the straight-line distance from glabella to
@@ -1250,8 +1253,27 @@ def outer_measurements(skull_p, comps, lc, ant, post, affine, mid, up, lr, fwd, 
     if near.sum() < 50:                       # a thin slab found nothing; widen once
         near = np.abs(lane) <= 3 * MIDLINE_MM
     mid_i = np.flatnonzero(near)
-    gi = int(mid_i[np.argmax(fv[near])])
-    oi = int(mid_i[np.argmin(fv[near])])
+    # Both ends are on the braincase, so the brain space bounds where they can be.
+    # Taking the furthest bone anywhere in the midline found the nose - from adolescence
+    # the nasal bones reach further forward than the brow - and a headrest labelled as
+    # skull 80 mm behind the head: lengths 20-50 mm too long in half the teenagers
+    # checked against the CHOP sheet.
+    #   glabella:       above the floor of the brain space's front; below it is face
+    #   both ends:      no further than BRAINCASE_MM from the brain space, front or back
+    brow = back = mid_i
+    if icv is not None and icv.any():
+        ii = np.argwhere(icv)
+        IW = ii @ affine[:3, :3].T + affine[:3, 3]
+        ifv, ih = (IW - mid) @ fwd, (IW - mid) @ up
+        floor = float(ih[ifv >= ifv.max() - FRONT_FLOOR_MM].min())
+        case = mid_i[(fv[mid_i] <= ifv.max() + BRAINCASE_MM)
+                     & (fv[mid_i] >= ifv.min() - BRAINCASE_MM)]
+        if len(case):
+            back = case
+            above = case[h[case] >= floor]
+            brow = above if len(above) else case
+    gi = int(brow[np.argmax(fv[brow])])
+    oi = int(back[np.argmin(fv[back])])
     keep("glabella", gi)
     keep("opisthocranion", oi)
     length = float(np.linalg.norm(W[gi] - W[oi]))
@@ -1553,7 +1575,7 @@ def measure_outside(stats, seg_out, vol, lc, ant, post, affine, mid, up, lr, fwd
     too, and the linear-only run, which has neither and reports the whole head.
     """
     lin = outer_measurements(seg_out / "total" / "skull.nii.gz", vol, lc, ant, post,
-                             affine, mid, up, lr, fwd, base_h)
+                             affine, mid, up, lr, fwd, base_h, icv=icv)
     if not lin:
         log("no total/skull mask - outer measurements skipped", 2)
         return
