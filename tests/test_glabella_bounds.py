@@ -40,3 +40,11 @@ assert back[1] > -100, f"opisthocranion went back to the headrest: {back}"
 assert abs(out["length_ofd"] - 2 * 76 * 1.2) < 6, out["length_ofd"]
 
 print("glabella bounds: ok")
+
+# and the table carries the index with the width and length it is made of, no more
+from ctseg.produce_table import read_stats
+cols = dict(read_stats("CASE_cranial_linear", {"outer_mm": out}))
+assert set(cols) == {("cranial", "index"), ("cranial", "width_mm"),
+                     ("cranial", "length_mm")}, sorted(cols)
+assert cols[("cranial", "length_mm")] == out["length_ofd"]
+print("cranial index columns: ok")

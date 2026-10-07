@@ -9,6 +9,8 @@ columns. Three kinds of file, three shapes:
   brain_icv.stats.json  brain and intracranial volume -> brain_icv_<name>
   *fossae_simple.*.json the three fossa compartments -> fossae_<compartment>_<name>,
                         and the outside of the skull in mm -> outer_<name>
+  *cranial_linear.*.json the cranial index and the width and length it is made of
+                        -> cranial_index, cranial_width_mm, cranial_length_mm
 
 plus the series number/name and slice count read from the converted NIfTI. Nothing is
 recomputed - this only reads what has already been written, so it is safe to run any
@@ -107,6 +109,12 @@ def stats_files(case_dir):
             if not (stem + f.name) in named]
 
 
+# What the cranial index run reports: the index and the two numbers it is made of,
+# not everything else it measures on the way. stats key -> column after "cranial_".
+CRANIAL_INDEX = {"cranial_index": "index", "width_bpd": "width_mm",
+                 "length_ofd": "length_mm"}
+
+
 def read_stats(task, d):
     """(task, column) and value for every number in one stats file.
 
@@ -116,9 +124,13 @@ def read_stats(task, d):
     """
     if not isinstance(d, dict):
         return
-    # a linear-only file carries outer_mm and no compartments at all
-    if (task.endswith("fossae_simple") or "compartments" in d
-            or "outer_mm" in d):
+    if task.endswith("cranial_linear"):
+        o = d.get("outer_mm") or {}
+        for k, col in CRANIAL_INDEX.items():
+            if isinstance(o.get(k), (int, float)):
+                yield ("cranial", col), o[k]
+        return
+    if task.endswith("fossae_simple") or "compartments" in d:
         if isinstance(d.get("icv_ml"), (int, float)):
             yield ("fossae", "icv_ml"), d["icv_ml"]
         # the outside of the head, filed on its own so a table of sizes does not have

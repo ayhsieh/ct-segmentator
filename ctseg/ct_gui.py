@@ -900,7 +900,7 @@ def job_table(project, select=None):
 
 
 LABELS = {"brain_icv": "brain and intracranial volume",
-          "fossae": "cranial fossae", "total": "whole body",
+          "fossae": "cranial fossae", "cranial": "cranial index", "total": "whole body",
           "brain_structures": "brain structures",
           "outer": "outside of the skull, in mm"}
 
@@ -1684,7 +1684,7 @@ def measurement_lines(group, case, shape, zooms, aff):
     only to draw a line.
     """
     import numpy as np
-    from ctseg.produce_table import stats_files
+    from ctseg.produce_table import CRANIAL_INDEX, stats_files
     d = seg_dir_for(group) / case
     # The fossa run and the cranial-index run both measure the outside; the newer one
     # was measured by the newer code, so it is the one drawn.
@@ -1699,6 +1699,9 @@ def measurement_lines(group, case, shape, zooms, aff):
         if (stats.get("outer_mm") or {}).get("points"):
             break
         stats = None
+    # a cranial index result shows what it reports and nothing else it measured
+    only = (set(CRANIAL_INDEX)
+            if stats and f.name.endswith("cranial_linear.stats.json") else None)
     pts = ((stats or {}).get("outer_mm") or {}).get("points") or {}
     if not pts:
         return []
@@ -1730,7 +1733,7 @@ def measurement_lines(group, case, shape, zooms, aff):
     out = []
     mm = (stats or {}).get("outer_mm") or {}
     for key, a, b, label, colour in MEASURES:
-        if mm.get(key) is None:
+        if mm.get(key) is None or (only and key not in only):
             continue
         if b is None:                       # a closed ring, not a pair of ends
             ring = pts.get(a)
@@ -1748,7 +1751,7 @@ def measurement_lines(group, case, shape, zooms, aff):
     # the ratios go last, where the width was taken
     where = next((m for m in out if m["key"] == "width_bpd"), None)
     for key, label, unit in RATIOS:
-        if mm.get(key) is None:
+        if mm.get(key) is None or (only and key not in only):
             continue
         v = mm[key]
         out.append({"key": key, "label": label, "colour": "#9d9689",

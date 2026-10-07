@@ -137,7 +137,7 @@ the next says **Queued**. Closing the browser doesn't stop it.
 - **All structure volumes** — every structure from every task, one row per patient
 - **Brain and ICV** — parenchyma and intracranial volume
 - **Cranial fossa volumes** — anterior, middle, posterior
-- **Cranial index** — width, length and the index, as `outer_` columns
+- **Cranial index** — `cranial_index`, `cranial_width_mm`, `cranial_length_mm`
 
 **Show in folder** opens any of them in Finder or Explorer. Segmentations are saved
 alongside as `.seg.nrrd`, which 3D Slicer opens directly.
