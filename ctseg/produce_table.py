@@ -228,13 +228,7 @@ def main():
     for case in cases if wanted("_scan") else []:
         # the date of the series this case was segmented from, not of whatever DICOM
         # the folder happens to hold first
-        d, note = study_date(args.group, case)
-        rows[case]["study_date"] = d
-        # Only when there IS a date and it might be the wrong one. With no date the
-        # blank already says so, and saying it again put a sentence on every row of a
-        # cohort that had simply not been run yet.
-        if d and note:
-            rows[case]["study_date_note"] = note
+        rows[case]["study_date"] = study_date(args.group, case)[0]
         rows[case]["slice_thickness_mm"] = slice_thickness(args.group, case)
         nifti_case_dir = nifti_dir / case
         if not nifti_case_dir.is_dir():
@@ -267,7 +261,7 @@ def main():
     df.index.name = "case"
     # The note next to the name it belongs to, then the scan's own details together,
     # then the measurements - whatever order the rows happened to fill them in.
-    first = ["note", "study_date", "study_date_note", "series_num", "series_name",
+    first = ["note", "study_date", "series_num", "series_name",
              "num_slices", "slice_thickness_mm", "slice_spacing_mm"]
     df = df[[c for c in first if c in df.columns] + [c for c in df.columns if c not in first]]
     out = args.out or str(total_dir / f"{args.group}_structure_volumes_ml.csv")
