@@ -24,6 +24,8 @@ def slice_at(path, thickness, acq=None, z=None, series=None):
     meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
     meta.TransferSyntaxUID = ExplicitVRLittleEndian
     ds = FileDataset(str(path), {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
+    ds.Rows = ds.Columns = 2
     ds.SliceThickness = thickness
     if acq is not None:
         ds.AcquisitionNumber = acq
@@ -89,5 +91,20 @@ with tempfile.TemporaryDirectory() as tmp:
     entry = {"snum": "2", "series_dir": "scans/CASE/DICOMOBJ"}
     files, _, snum = ct_paths.resolve_from_cache(entry, flat.parent, "proj")
     assert len(files) == 10 and snum == "2", len(files)
+
+    # the chosen series at both ends of the folder, another one in the middle
+    ends = d / "proj" / "scans" / "ENDS" / "DICOMOBJ"
+    for i in range(5):
+        slice_at(ends / f"000{i}", 0.6, series=2, z=i)
+        slice_at(ends / f"900{i}", 0.6, series=2, z=5 + i)
+        slice_at(ends / f"500{i}", 5.0, series=7, z=i)
+    entry = {"snum": "2", "series_dir": "scans/ENDS/DICOMOBJ"}
+    files, _, _ = ct_paths.resolve_from_cache(entry, ends.parent, "proj")
+    assert len(files) == 10, len(files)
+    # and the series preview sees the same ten
+    from ctseg.ct_gui import _series_files
+    assert len(_series_files(ends, "2")) == 10
+    # a retake previews as the one scan that will be converted, not both stacked
+    assert sorted(_series_files(d / "retake", "")) == sorted(again)
 
 print("one reconstruction: ok")

@@ -1741,6 +1741,7 @@ deleted and your series choice is kept; untick to bring it back."
     const base = "/api/series/preview.png?name=" + encodeURIComponent(name) +
                  "&case=" + encodeURIComponent(cse) +
                  "&path=" + encodeURIComponent(s.series_dir) +
+                 "&snum=" + encodeURIComponent(s.snum) +
                  "&token=" + encodeURIComponent(TOKEN);
     let want = 0, inflight = false;
     /* One request in flight, latest wins - scrubbing then self-paces instead of
@@ -1761,7 +1762,8 @@ deleted and your series choice is kept; untick to bring it back."
     sl.oninput = () => { want = +sl.value; show(); };
     api("/api/series/info?name=" + encodeURIComponent(name) +
         "&case=" + encodeURIComponent(cse) +
-        "&path=" + encodeURIComponent(s.series_dir))
+        "&path=" + encodeURIComponent(s.series_dir) +
+        "&snum=" + encodeURIComponent(s.snum))
       .then(info => {
         sl.max = Math.max(0, info.slices - 1);
         sl.value = want = Math.floor(info.slices / 2);   /* mid-stack answers most of it */
@@ -2948,6 +2950,7 @@ async function viewseg(name, cse, focus) {
     ? "/api/series/preview.png?name=" + encodeURIComponent(name) +
       "&case=" + encodeURIComponent(cse) +
       "&path=" + encodeURIComponent(S.ser.series_dir) +
+      "&snum=" + encodeURIComponent(S.ser.snum) +
       "&i=" + (i === undefined ? S.ri : i) +
       "&ww=" + Math.round(S.ww) + "&wl=" + Math.round(S.wl) +
       "&token=" + encodeURIComponent(TOKEN)

@@ -12,7 +12,7 @@ import os
 from collections import Counter
 from pathlib import Path
 
-from ctseg.ct_paths import cache_get, case_dir_for, load_cache, resolve_from_cache, unanchored
+from ctseg.ct_paths import cache_get, case_dir_for, in_series, load_cache, pick_folder, unanchored
 
 DATE_TAGS = ["StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate"]
 
@@ -106,13 +106,15 @@ def slice_thickness(group, case):
     """
     import pydicom
     d = case_dir_for(group, case)
-    # the chosen series' own files - its folder may hold every series of the study
-    files, _, _ = resolve_from_cache(cache_get(load_cache(group), d, group), d, group)
-    for f in files or ():
+    entry = cache_get(load_cache(group), d, group)
+    folder = pick_folder(entry, group)
+    for f in sorted(folder.iterdir()) if folder else ():
         try:
             ds = pydicom.dcmread(str(f), stop_before_pixels=True,
-                                 specific_tags=["SliceThickness"])
+                                 specific_tags=["SeriesNumber", "SliceThickness"])
         except Exception:
+            continue
+        if not in_series(ds, entry["snum"]):    # its folder may hold the whole study
             continue
         try:
             return round(float(ds.SliceThickness), 3)   # one slice speaks for the series

@@ -45,7 +45,7 @@ PROJECTS = APP / "projects"
 # Where the pipeline reads and writes, for this process and every child it starts.
 # Set before ct_paths is imported, because that is when it is read.
 os.environ["CT_DATA_ROOT"] = str(PROJECTS)
-from ctseg.ct_paths import is_dicom_file, nifti_dir_for, seg_dir_for  # noqa: E402
+from ctseg.ct_paths import is_dicom_file, nifti_dir_for, seg_dir_for, in_series  # noqa: E402
 PAGE_FILE = HERE / "ct_gui_page.html"
 TOKEN = secrets.token_urlsafe(18)
 WIN = sys.platform == "win32"
@@ -1107,15 +1107,13 @@ def scan_folder(path, group, quick=False):
     # ct_paths, not segment_structures: answering from a recorded choice needs no
     # scoring, and importing the pipeline would load torch - seconds, and a few hundred
     # megabytes of CUDA DLLs that Windows can refuse outright when commit is short.
-    from ctseg.ct_paths import load_cache, cache_get, resolve_from_cache
+    from ctseg.ct_paths import load_cache, cache_get, pick_folder
     path = Path(path)
     entry = cache_get(load_cache(group), path, group)
     cached = None
-    if entry:
-        files, desc, snum = resolve_from_cache(entry, path, group)
-        if files:
-            cached = {"snum": snum, "desc": desc,
-                      "series_dir": entry.get("series_dir", "")}
+    if pick_folder(entry, group):
+        cached = {"snum": entry["snum"], "desc": entry.get("desc", ""),
+                  "series_dir": entry["series_dir"]}
 
     if cached and quick:
         # This is the whole reason the command line starts instantly on a study it has
@@ -1881,13 +1879,13 @@ _SERIES_CACHE = {}
 _SERIES_CACHE_MAX = 8
 
 
-def _series_files(series_dir):
+def _series_files(series_dir, snum):
     """The slices of one series, ordered the way they stack."""
     import pydicom
     d = Path(series_dir)
     if not d.is_dir():
         raise RuntimeError("that series folder is not there")
-    key = (str(d.resolve()), int(d.stat().st_mtime))
+    key = (str(d.resolve()), int(d.stat().st_mtime), str(snum))
     hit = _SERIES_CACHE.get(key)
     if hit:
         return hit
@@ -1903,6 +1901,8 @@ def _series_files(series_dir):
         # is what says this is an image rather than a DICOMDIR or a report
         if not hasattr(ds, "SOPInstanceUID") or not hasattr(ds, "Rows"):
             continue
+        if not in_series(ds, snum):       # the folder may hold the whole study
+            continue
         # ImagePositionPatient sorts a tilted or interleaved stack correctly where
         # InstanceNumber only sorts what the scanner happened to number in order.
         try:
@@ -1912,7 +1912,11 @@ def _series_files(series_dir):
         rows.append((z, str(f)))
     if not rows:
         raise RuntimeError("no readable images in that folder")
-    rows.sort()
+    # what conversion would take, so the preview never shows a retake or a second
+    # reconstruction stacked into the scan being judged
+    from ctseg.segment_structures import one_reconstruction
+    keep = set(one_reconstruction([f for _, f in rows]))
+    rows = sorted(r for r in rows if r[1] in keep)
     out = [f for _, f in rows]
     if len(_SERIES_CACHE) >= _SERIES_CACHE_MAX:
         _SERIES_CACHE.pop(next(iter(_SERIES_CACHE)))
@@ -1930,7 +1934,7 @@ def series_under_case(project, case, series_dir):
     return d
 
 
-def series_preview_png(series_dir, i, ww, wl):
+def series_preview_png(series_dir, snum, i, ww, wl):
     """One slice of a raw DICOM series, windowed, as PNG bytes."""
     import io
     import numpy as np
@@ -1938,7 +1942,7 @@ def series_preview_png(series_dir, i, ww, wl):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    files = _series_files(series_dir)
+    files = _series_files(series_dir, snum)
     i = max(0, min(len(files) - 1, int(i)))
     ds = pydicom.dcmread(files[i], force=True)
     arr = ds.pixel_array.astype(np.float32)
@@ -2302,7 +2306,7 @@ class Handler(BaseHTTPRequestHandler):
                 name = self._project(q)
                 d = series_under_case(name, self._case(q, name),
                                       q.get("path", ""))
-                png, n = series_preview_png(d, _qint(q, "i", 0),
+                png, n = series_preview_png(d, q.get("snum", ""), _qint(q, "i", 0),
                                             _qint(q, "ww", 2500), _qint(q, "wl", 480))
                 return self._send(200, png, "image/png",
                                   {"Cache-Control": "private, max-age=300",
@@ -2311,7 +2315,7 @@ class Handler(BaseHTTPRequestHandler):
                 name = self._project(q)
                 d = series_under_case(name, self._case(q, name),
                                       q.get("path", ""))
-                return self._json({"slices": len(_series_files(d)),
+                return self._json({"slices": len(_series_files(d, q.get("snum", ""))),
                                    "presets": WINDOW_PRESETS})
             if u.path == "/api/view/mesh.bin":
                 name = self._project(q)

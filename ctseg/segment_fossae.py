@@ -48,7 +48,7 @@ import numpy as np
 import nibabel as nib
 from scipy import ndimage
 from scipy.interpolate import PchipInterpolator
-from ctseg.ct_paths import seg_dir_for, group_dir
+from ctseg.ct_paths import seg_dir_for, nifti_dir_for, group_dir
 from ctseg.segment_structures import find_source_nifti, multilabel_to_segnrrd
 from totalsegmentator.map_to_binary import class_map
 
