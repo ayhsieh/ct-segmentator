@@ -115,9 +115,11 @@ folder.
 **Start segmenting**. Names ending in `_mr` are for MRI, not CT. Sets marked **license**
 need a free academic number from
 [here](https://backend.totalsegmentator.com/license-academic/), pasted into the box that
-appears. Below the structures are three extra analyses, **cranial fossa volumes**,
-**cranial index** and **brain and intracranial volume**, all needing `brain_structures`
-first. Cranial index is 100 x skull width (euryon to euryon) / length (glabella to
+appears. Below the structures are four extra analyses: **cranial fossa volumes**,
+**cranial index** and **brain and intracranial volume**, which need `brain_structures`
+first, and **facial soft tissue** (skin, fat and muscle outside the skull, down to the
+jaw), which segments the six head tasks it subtracts first. Each segments whatever it
+needs before it runs. Cranial index is 100 x skull width (euryon to euryon) / length (glabella to
 opisthocranion); the viewer draws both lines. Anything
 already done is skipped unless you check **re-run even if done**.
 
@@ -138,6 +140,7 @@ the next says **Queued**. Closing the browser doesn't stop it.
 - **Brain and ICV** — parenchyma and intracranial volume
 - **Cranial fossa volumes** — anterior, middle, posterior
 - **Cranial index** — `cranial_index`, `cranial_width_mm`, `cranial_length_mm`
+- **Facial soft tissue** — `facial_soft_tissue_ml` and its `_skin_ml`, `_fat_ml`, `_muscle_ml`
 
 **Show in folder** opens any of them in Finder or Explorer. Segmentations are saved
 alongside as `.seg.nrrd`, which 3D Slicer opens directly.
@@ -181,7 +184,7 @@ Inside `ctseg/`:
 |---|---|
 | `ct_gui.py`, `ct_gui_page.html` | the browser tool |
 | `segment_structures.py` | DICOM to NIfTI, then TotalSegmentator or DentalSegmentator |
-| `segment_fossae.py`, `brain_icv.py` | the measurements: fossa volumes, linear measurements, brain and ICV |
+| `segment_fossae.py`, `brain_icv.py`, `segment_soft_tissue.py` | the measurements: fossa volumes, cranial index, brain and ICV, soft tissue |
 | `produce_table.py` | one CSV per project from every result on disk |
 | `markups_to_points.py` | hand-placed Slicer landmarks into the CSV the measurements read |
 | `ct_paths.py`, `ct_dates.py`, `label_cranial_bones.py` | shared by the scripts above |

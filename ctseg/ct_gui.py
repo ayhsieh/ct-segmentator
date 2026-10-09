@@ -257,7 +257,7 @@ ANALYSES = {
         "label": "Cranial fossa volumes",
         "blurb": "anterior / middle / posterior compartments from the skull-floor map",
         "script": "ctseg.segment_fossae",
-        "needs": ["brain_structures"],
+        "needs": ["brain_structures", "total"],
         "proofs": ["*fossae_simple.stats.json"],
     },
     "cranial_index": {
@@ -265,14 +265,25 @@ ANALYSES = {
         "blurb": "100 x skull width / length, both lines drawn in the viewer",
         "script": "ctseg.segment_fossae",
         "args": ["--linear-only"],
-        "needs": ["brain_structures"],
+        "needs": ["brain_structures", "total"],
         "proofs": ["*cranial_linear.stats.json"],
+    },
+    "facial_soft_tissue": {
+        "label": "Facial soft tissue",
+        "blurb": "skin, fat and muscle of the face and scalp, outside the skull, down "
+                 "to the jaw",
+        "script": "ctseg.segment_soft_tissue",
+        "args": ["--preset", "face"],
+        # every task whose masks the face preset subtracts or floors on
+        "needs": ["body", "total", "brain_structures", "head_glands_cavities",
+                  "head_muscles", "craniofacial_structures", "headneck_bones_vessels"],
+        "proofs": ["facial_soft_tissue.stats.json"],
     },
     "brain_icv": {
         "label": "Brain and intracranial volume",
         "blurb": "parenchyma and ICV, as two Slicer layers plus a CSV",
         "script": "ctseg.brain_icv",
-        "needs": ["brain_structures"],
+        "needs": ["brain_structures", "total"],
         "proofs": ["brain_icv.stats.json"],
     },
 }
@@ -585,10 +596,11 @@ def case_status(group, case):
     fossa = bool(list(d.glob("*fossae_simple.stats.json"))) if d.is_dir() else False
     linear = bool(list(d.glob("*cranial_linear.stats.json"))) if d.is_dir() else False
     icv = (d / "brain_icv.stats.json").exists() if d.is_dir() else False
+    soft = (d / "facial_soft_tissue.stats.json").exists() if d.is_dir() else False
     traced = bool(list(d.glob("*_traced.json"))) if d.is_dir() else False
     nii = nifti_dir_for(group) / case
     return {"case": case, "tasks": sorted(done), "fossae": fossa, "linear": linear,
-            "brain_icv": icv,
+            "brain_icv": icv, "soft_tissue": soft,
             "traced": traced,
             "converted": bool(list(nii.glob("*.nii.gz"))) if nii.is_dir() else False}
 
@@ -817,14 +829,21 @@ def job_segment(project, cases, tasks, device, license_no, force):
     return Job("segment", project, f"{len(tasks)} task(s) x {len(cases)} case(s)", steps)
 
 
-# What an analysis reads before it computes anything: the brain structure maps, and the
-# brain ROI from total, which gives the foramen magnum floor. Each entry is the task to
-# run, the extra arguments it needs, and the file that proves it has already been run.
-PREREQS = [("brain_structures", [], ["brain_structures/*.nii.gz"]),
-           # brain for the foramen-magnum cut, skull for the outside measurements.
-           # Both come out of one pass, so asking for the second costs nothing.
-           ("total", ["--roi-subset", "brain", "skull"],
-            ["total/brain.nii.gz", "total/skull.nii.gz"])]
+# What an analysis reads before it computes anything, by task: the extra arguments the
+# task is run with, and the files that prove it has already been run. Each analysis
+# names the ones it needs in ANALYSES[...]["needs"].
+PREREQS = {
+    # brain for the foramen-magnum cut, skull for the outside measurements. Both come
+    # out of one pass, so asking for the second costs nothing.
+    "total": (["--roi-subset", "brain", "skull"],
+              ["total/brain.nii.gz", "total/skull.nii.gz"]),
+}
+
+
+def prereq(task):
+    """(extra args, proofs) for a prerequisite task; by default the whole task, proven
+    by its folder of masks."""
+    return PREREQS.get(task, ([], [f"{task}/*.nii.gz"]))
 
 
 def has_output(project, case, proofs):
@@ -838,15 +857,17 @@ def has_output(project, case, proofs):
     return all(list(d.glob(pat)) for pat in proofs)
 
 
-def prereq_steps(project, cases):
+def prereq_steps(project, cases, kinds):
     """(case, task, extra) for every prerequisite a run would have to segment first.
 
     One answer, used twice: to build the steps, and to decide whether a licence number
     is needed. Asked separately they drifted, and the interface demanded a licence for
     a run whose licensed mask every case already had."""
+    tasks = list(dict.fromkeys(t for k in kinds for t in ANALYSES[k]["needs"]))
     out = []
     for case in cases:
-        for task, extra, proofs in PREREQS:
+        for task in tasks:
+            extra, proofs = prereq(task)
             if not has_output(project, case, proofs):
                 out.append((case, task, extra))
     return out
@@ -865,7 +886,7 @@ def job_analysis(project, kind, cases, device, license_no="", force=False):
     """
     spec = ANALYSES[kind]
     steps = []
-    for case, task, extra in prereq_steps(project, cases):
+    for case, task, extra in prereq_steps(project, cases, [kind]):
         argv = PY + ["-m", "ctseg.segment_structures", str(case_dir(project, case)),
                      "--group-name", project, "--task", task,
                      "--skip-planning", "--device", device] + extra
@@ -901,6 +922,7 @@ def job_table(project, select=None):
 
 LABELS = {"brain_icv": "brain and intracranial volume",
           "fossae": "cranial fossae", "cranial": "cranial index", "total": "whole body",
+          "facial_soft_tissue": "facial soft tissue",
           "brain_structures": "brain structures",
           "outer": "outside of the skull, in mm"}
 
@@ -2540,7 +2562,8 @@ class Handler(BaseHTTPRequestHandler):
                 # could
                 wanted = set(tasks)
                 if analyses:
-                    wanted |= {t for _, t, _ in prereq_steps(name, cases)}
+                    wanted |= {t for _, t, _ in prereq_steps(
+                        name, cases, [a for a in analyses if a in ANALYSES])}
                 need_lic = [t for t in sorted(wanted) if t in LICENSED_TASKS]
                 if need_lic and not lic and not license_stored():
                     return self._json({"error": "these need a license number: "

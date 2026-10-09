@@ -11,6 +11,8 @@ columns. Three kinds of file, three shapes:
                         and the outside of the skull in mm -> outer_<name>
   *cranial_linear.*.json the cranial index and the width and length it is made of
                         -> cranial_index, cranial_width_mm, cranial_length_mm
+  facial_soft_tissue.stats.json  the envelope and its skin / fat / muscle split
+                        -> facial_soft_tissue_ml, _skin_ml, _fat_ml, _muscle_ml
 
 plus the series number/name and slice count read from the converted NIfTI. Nothing is
 recomputed - this only reads what has already been written, so it is safe to run any
@@ -129,6 +131,15 @@ def read_stats(task, d):
         for k, col in CRANIAL_INDEX.items():
             if isinstance(o.get(k), (int, float)):
                 yield ("cranial", col), o[k]
+        return
+    if isinstance(d.get("soft_tissue"), dict):        # segment_soft_tissue's file
+        name = d["soft_tissue"].get("file") or task
+        if isinstance(d["soft_tissue"].get("ml"), (int, float)):
+            yield (name, "ml"), d["soft_tissue"]["ml"]
+        for part in ("skin", "fat", "muscle"):
+            v = (d.get("composition") or {}).get(f"{part}_ml")
+            if isinstance(v, (int, float)):
+                yield (name, f"{part}_ml"), v
         return
     if task.endswith("fossae_simple") or "compartments" in d:
         if isinstance(d.get("icv_ml"), (int, float)):
