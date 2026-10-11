@@ -278,6 +278,7 @@ PRESETS = {
         # tongue, glands and the airway walls are tissue between skin and bone, so stay.
         "exclude": ["bone", "intracranial"],
         "floor": "mandible",
+        "composition": False,     # one mask: the study asks for soft tissue, not a split
         "name": "head_soft_tissue",
         "desc": "everything inside the skin and outside the bone, mandible floor",
     },
@@ -617,16 +618,18 @@ def main():
             log(f"cut {floor_cut_ml:.1f} mL below the {FLOORS[floor]['desc']}", 1)
 
     # ---- tissue composition -------------------------------------------------
-    log("STEP 4/5  skin / fat / muscle breakdown")
-    if args.skin_mm > 0:
+    split = preset.get("composition", True) if preset else True
+    log("STEP 4/5  skin / fat / muscle breakdown" + ("" if split else " - not asked for"))
+    if split and args.skin_mm > 0:
         log(f"skin = within {args.skin_mm:g} mm of the body surface and > {args.fat_hu_max:.0f} HU", 1)
-    else:
+    elif split:
         log("skin layer disabled (--skin-mm 0)", 1)
-    skin, fat, muscle = build_composition(soft, body, hu, zooms,
-                                          args.skin_mm, args.fat_hu_max)
-    comp_ml = {"skin": ml(skin), "fat": ml(fat), "muscle": ml(muscle)}
-    for k, v in comp_ml.items():
-        log(f"{k:<7}{v:>9.1f} mL", 2)
+    if split:
+        skin, fat, muscle = build_composition(soft, body, hu, zooms,
+                                              args.skin_mm, args.fat_hu_max)
+        comp_ml = {"skin": ml(skin), "fat": ml(fat), "muscle": ml(muscle)}
+        for k, v in comp_ml.items():
+            log(f"{k:<7}{v:>9.1f} mL", 2)
 
     log("STEP 5/5  writing outputs")
     log(f"{out_name} (.nii.gz + .seg.nrrd)", 1)
@@ -634,15 +637,16 @@ def main():
 
     # One multilabel file so skin / fat / muscle can be shown and measured separately
     # in Slicer. The three are disjoint and sum exactly to the envelope above.
-    comp = np.zeros(ref_shape, dtype=np.uint8)
-    comp[muscle] = 3
-    comp[fat] = 2
-    comp[skin] = 1
-    comp_img = nib.Nifti1Image(comp, ct_img.affine)
-    nib.save(comp_img, str(seg_out / f"{out_name}_composition.nii.gz"))
-    multilabel_to_segnrrd(comp_img, {1: "skin", 2: "fat", 3: "muscle"},
-                          seg_out / f"{out_name}_composition.seg.nrrd")
-    log(f"{out_name}_composition (.nii.gz + .seg.nrrd)", 1)
+    if split:
+        comp = np.zeros(ref_shape, dtype=np.uint8)
+        comp[muscle] = 3
+        comp[fat] = 2
+        comp[skin] = 1
+        comp_img = nib.Nifti1Image(comp, ct_img.affine)
+        nib.save(comp_img, str(seg_out / f"{out_name}_composition.nii.gz"))
+        multilabel_to_segnrrd(comp_img, {1: "skin", 2: "fat", 3: "muscle"},
+                              seg_out / f"{out_name}_composition.seg.nrrd")
+        log(f"{out_name}_composition (.nii.gz + .seg.nrrd)", 1)
 
     stats = {
         "ct": os.path.basename(str(ct_path)),
@@ -664,7 +668,7 @@ def main():
                         "fat_hu_max": args.fat_hu_max,
                         "skin_ml": comp_ml["skin"],
                         "fat_ml": comp_ml["fat"],
-                        "muscle_ml": comp_ml["muscle"]},
+                        "muscle_ml": comp_ml["muscle"]} if split else None,
         "soft_tissue": {"file": out_name,
                         "ml": ml(soft),
                         "ml_before_exclusions": ml(raw),
@@ -684,11 +688,12 @@ def main():
           f"(-{stats['soft_tissue']['excluded_ml']:.1f} mL exclusions"
           + (f", -{floor_cut_ml:.1f} mL below the {FLOORS[floor]['desc']}"
              if floor_mask is not None else "") + ")")
-    print(f"    - skin              : {comp_ml['skin']:>8.1f} mL  "
-          f"(<= {args.skin_mm:g} mm from the surface, > {args.fat_hu_max:.0f} HU)")
-    print(f"    - fat               : {comp_ml['fat']:>8.1f} mL  "
-          f"(<= {args.fat_hu_max:.0f} HU)")
-    print(f"    - muscle / lean     : {comp_ml['muscle']:>8.1f} mL")
+    if split:
+        print(f"    - skin              : {comp_ml['skin']:>8.1f} mL  "
+              f"(<= {args.skin_mm:g} mm from the surface, > {args.fat_hu_max:.0f} HU)")
+        print(f"    - fat               : {comp_ml['fat']:>8.1f} mL  "
+              f"(<= {args.fat_hu_max:.0f} HU)")
+        print(f"    - muscle / lean     : {comp_ml['muscle']:>8.1f} mL")
     print("\n  exclusion groups (volume overlapping the HU-window mask):")
     for g, r in group_report.items():
         flag = "ON " if r["enabled"] else "off"

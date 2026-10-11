@@ -26,4 +26,10 @@ cols = {f"{t}_{n}": v for (t, n), v in read_stats("head_soft_tissue", stats)}
 assert cols == {"head_soft_tissue_ml": 593.9, "head_soft_tissue_skin_ml": 94.2,
                 "head_soft_tissue_fat_ml": 124.2,
                 "head_soft_tissue_muscle_ml": 375.5}, cols
+# the head preset reports soft tissue alone, no split
+assert PRESETS["head"]["composition"] is False
+only = {k: v for k, v in read_stats("head_soft_tissue",
+                                    {"soft_tissue": {"file": "head_soft_tissue", "ml": 600.0},
+                                     "composition": None})}
+assert only == {("head_soft_tissue", "ml"): 600.0}, only
 print("soft tissue option: ok")
