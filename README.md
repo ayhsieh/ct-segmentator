@@ -117,8 +117,8 @@ need a free academic number from
 [here](https://backend.totalsegmentator.com/license-academic/), pasted into the box that
 appears. Below the structures are four extra analyses: **cranial fossa volumes**,
 **cranial index** and **brain and intracranial volume**, which need `brain_structures`
-first, and **facial soft tissue** (skin, fat and muscle outside the skull, down to the
-jaw), which segments the six head tasks it subtracts first. Each segments whatever it
+first, and **soft tissue** (everything inside the skin and outside the bone, above the jaw),
+which segments the body outline and the skull, face and neck bones first. Each segments whatever it
 needs before it runs. Cranial index is 100 x skull width (euryon to euryon) / length (glabella to
 opisthocranion); the viewer draws both lines. Anything
 already done is skipped unless you check **re-run even if done**.
@@ -140,7 +140,7 @@ the next says **Queued**. Closing the browser doesn't stop it.
 - **Brain and ICV** — parenchyma and intracranial volume
 - **Cranial fossa volumes** — anterior, middle, posterior
 - **Cranial index** — `cranial_index`, `cranial_width_mm`, `cranial_length_mm`
-- **Facial soft tissue** — `facial_soft_tissue_ml` and its `_skin_ml`, `_fat_ml`, `_muscle_ml`
+- **Soft tissue** — `head_soft_tissue_ml` and its `_skin_ml`, `_fat_ml`, `_muscle_ml`
 
 **Show in folder** opens any of them in Finder or Explorer. Segmentations are saved
 alongside as `.seg.nrrd`, which 3D Slicer opens directly.

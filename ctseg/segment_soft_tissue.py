@@ -272,6 +272,15 @@ PRESETS = {
         "name": "facial_soft_tissue",
         "desc": "skin + subcutaneous fat + facial muscle, mandible floor, scalp included",
     },
+    "head": {
+        # Inside the skin, outside the bone: the whole head above the jaw, with only the
+        # skeleton and what it encloses taken out. Air goes by the HU window. Eyes,
+        # tongue, glands and the airway walls are tissue between skin and bone, so stay.
+        "exclude": ["bone", "intracranial"],
+        "floor": "mandible",
+        "name": "head_soft_tissue",
+        "desc": "everything inside the skin and outside the bone, mandible floor",
+    },
 }
 
 # Inferior cut planes: keep only voxels at or above the lowest voxel of a reference mask.

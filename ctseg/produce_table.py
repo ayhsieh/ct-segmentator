@@ -11,8 +11,8 @@ columns. Three kinds of file, three shapes:
                         and the outside of the skull in mm -> outer_<name>
   *cranial_linear.*.json the cranial index and the width and length it is made of
                         -> cranial_index, cranial_width_mm, cranial_length_mm
-  facial_soft_tissue.stats.json  the envelope and its skin / fat / muscle split
-                        -> facial_soft_tissue_ml, _skin_ml, _fat_ml, _muscle_ml
+  head_soft_tissue.stats.json  (any segment_soft_tissue output) the envelope and its
+                        skin / fat / muscle split -> head_soft_tissue_ml, _skin_ml, ...
 
 plus the series number/name and slice count read from the converted NIfTI. Nothing is
 recomputed - this only reads what has already been written, so it is safe to run any

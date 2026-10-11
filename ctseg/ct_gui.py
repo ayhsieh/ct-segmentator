@@ -268,16 +268,17 @@ ANALYSES = {
         "needs": ["brain_structures", "total"],
         "proofs": ["*cranial_linear.stats.json"],
     },
-    "facial_soft_tissue": {
-        "label": "Facial soft tissue",
-        "blurb": "skin, fat and muscle of the face and scalp, outside the skull, down "
-                 "to the jaw",
+    "soft_tissue": {
+        "label": "Soft tissue",
+        "blurb": "everything inside the skin and outside the bone, above the jaw, split "
+                 "into skin, fat and lean tissue",
         "script": "ctseg.segment_soft_tissue",
-        "args": ["--preset", "face"],
-        # every task whose masks the face preset subtracts or floors on
-        "needs": ["body", "total", "brain_structures", "head_glands_cavities",
-                  "head_muscles", "craniofacial_structures", "headneck_bones_vessels"],
-        "proofs": ["facial_soft_tissue.stats.json"],
+        "args": ["--preset", "head"],
+        # the skin outline, the bones it subtracts (skull, face, neck), the inside of
+        # the skull, and the mandible it floors on
+        "needs": ["body", "total", "brain_structures", "craniofacial_structures",
+                  "headneck_bones_vessels"],
+        "proofs": ["head_soft_tissue.stats.json"],
     },
     "brain_icv": {
         "label": "Brain and intracranial volume",
@@ -596,7 +597,7 @@ def case_status(group, case):
     fossa = bool(list(d.glob("*fossae_simple.stats.json"))) if d.is_dir() else False
     linear = bool(list(d.glob("*cranial_linear.stats.json"))) if d.is_dir() else False
     icv = (d / "brain_icv.stats.json").exists() if d.is_dir() else False
-    soft = (d / "facial_soft_tissue.stats.json").exists() if d.is_dir() else False
+    soft = (d / "head_soft_tissue.stats.json").exists() if d.is_dir() else False
     traced = bool(list(d.glob("*_traced.json"))) if d.is_dir() else False
     nii = nifti_dir_for(group) / case
     return {"case": case, "tasks": sorted(done), "fossae": fossa, "linear": linear,
@@ -922,7 +923,7 @@ def job_table(project, select=None):
 
 LABELS = {"brain_icv": "brain and intracranial volume",
           "fossae": "cranial fossae", "cranial": "cranial index", "total": "whole body",
-          "facial_soft_tissue": "facial soft tissue",
+          "head_soft_tissue": "soft tissue", "facial_soft_tissue": "facial soft tissue",
           "brain_structures": "brain structures",
           "outer": "outside of the skull, in mm"}
 
