@@ -1235,11 +1235,13 @@ async function project(name) {
       if (box.dataset.built) return;
       const undo = pending(ev.currentTarget, "Reading\u2026");
       try {
-        const {tasks} = await api("/api/columns?name=" + encodeURIComponent(name));
+        const {tasks, saved} = await api("/api/columns?name=" + encodeURIComponent(name));
         box.dataset.built = "1";
         box.innerHTML = "";
-        const chosen = new Map(tasks.map(t => [t.task, new Set()]));   // empty = all
-        const on = new Set(tasks.map(t => t.task));
+        /* opens on the choice the last build used, so it is not made again each time */
+        const chosen = new Map(tasks.map(t =>                            // empty = all
+          [t.task, new Set(saved && saved[t.task] || [])]));
+        const on = new Set(tasks.map(t => t.task).filter(t => !saved || t in saved));
         function sync() {
           select = {};
           for (const t of on) select[t] = [...chosen.get(t)];
@@ -1254,7 +1256,7 @@ async function project(name) {
           const grp = $(`<div></div>`);
           const head = $(`<label style="display:flex;gap:9px;padding:8px 12px;
             background:var(--panel);cursor:pointer;align-items:center">
-            <input type="checkbox" checked>
+            <input type="checkbox" ${on.has(t.task) ? "checked" : ""}>
             <b class="ui">${esc(t.label || t.task)}</b>
             <span class="meta">${t.structures.length}</span>
             <span class="right meta open" style="text-decoration:underline">list</span>
@@ -1262,7 +1264,8 @@ async function project(name) {
           const body = $(`<div class="hide"></div>`);
           for (const st of t.structures) {
             const row = $(`<label style="display:flex;gap:9px;padding:5px 12px 5px 32px">
-              <input type="checkbox" class="one">
+              <input type="checkbox" class="one" ${
+                chosen.get(t.task).has(st.name) ? "checked" : ""}>
               <span class="tname">${esc(st.name)}</span>
               <span class="right meta">${st.cases}</span></label>`);
             row.querySelector("input").onchange = (e) => {

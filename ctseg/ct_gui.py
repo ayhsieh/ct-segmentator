@@ -905,10 +905,22 @@ def job_analysis(project, kind, cases, device, license_no="", force=False):
     return Job(kind, project, spec["label"], steps)
 
 
+def saved_columns(project):
+    """The column choice the last build used, or None if it has never been narrowed."""
+    try:
+        return json.loads((seg_dir_for(project) / ".table_columns.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def job_table(project, select=None):
     """The one table. produce_table.py reads every stats file the pipeline has written
-    and nothing else - no segmenting, whatever is missing simply has no column."""
+    and nothing else - no segmenting, whatever is missing simply has no column.
+
+    With no choice sent, the last one is used again: a build is a repeat far more often
+    than a change of mind, and the choice is kept for exactly that."""
     out = seg_dir_for(project) / f"{project}_volumes_ml.csv"
+    select = select or saved_columns(project)
     argv = PY + ["-m", "ctseg.produce_table", "--group", project, "--out", str(out)]
     if select:
         # via a file rather than the command line: a whole-body task alone is over a
@@ -952,7 +964,7 @@ def table_columns(project):
     out.append({"task": "_scan", "label": "scan details",
                 "structures": [{"name": "series and slice count",
                                 "cases": len(cases)}]})
-    return {"cases": len(cases), "tasks": out}
+    return {"cases": len(cases), "tasks": out, "saved": saved_columns(project)}
 
 
 def job_scan(project, cases, quick=False, waiting=False):
