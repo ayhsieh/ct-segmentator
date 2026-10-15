@@ -11,6 +11,8 @@ columns. Three kinds of file, three shapes:
                         and the outside of the skull in mm -> outer_<name>
   *cranial_linear.*.json the cranial index and the width and length it is made of
                         -> cranial_index, cranial_width_mm, cranial_length_mm
+  lobe_dimensions.stats.json  width / length / height of each lobe, per side
+                        -> lobe_frontal_right_width_mm, ..., lobe_frontal_partial
   head_soft_tissue.stats.json  (any segment_soft_tissue output) the envelope and its
                         skin / fat / muscle split -> head_soft_tissue_ml, _skin_ml, ...
 
@@ -131,6 +133,14 @@ def read_stats(task, d):
         for k, col in CRANIAL_INDEX.items():
             if isinstance(o.get(k), (int, float)):
                 yield ("cranial", col), o[k]
+        return
+    if task == "lobe_dimensions":                    # ctseg.lobe_dimensions
+        for lobe, rec in (d.get("lobes") or {}).items():
+            name = lobe.replace("_lobe", "")
+            for side in ("right", "left"):
+                for dim, v in (rec.get(side) or {}).items():
+                    yield ("lobe", f"{name}_{side}_{dim}"), v
+            yield ("lobe", f"{name}_partial"), int(bool(rec.get("partial")))
         return
     if isinstance(d.get("soft_tissue"), dict):        # segment_soft_tissue's file
         name = d["soft_tissue"].get("file") or task

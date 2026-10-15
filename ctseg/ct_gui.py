@@ -934,7 +934,7 @@ def job_table(project, select=None):
 
 
 LABELS = {"brain_icv": "brain and intracranial volume",
-          "fossae": "cranial fossae", "cranial": "cranial index", "total": "whole body",
+          "fossae": "cranial fossae", "cranial": "cranial index", "lobe": "lobe dimensions", "total": "whole body",
           "head_soft_tissue": "soft tissue", "facial_soft_tissue": "facial soft tissue",
           "brain_structures": "brain structures",
           "outer": "outside of the skull, in mm"}
