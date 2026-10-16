@@ -135,7 +135,10 @@ def read_stats(task, d):
                 yield ("cranial", col), o[k]
         return
     if task == "lobe_dimensions":                    # ctseg.lobe_dimensions
-        for lobe, rec in (d.get("lobes") or {}).items():
+        parts = dict(d.get("lobes") or {})
+        if d.get("cerebrum"):
+            parts["cerebrum"] = d["cerebrum"]
+        for lobe, rec in parts.items():
             name = lobe.replace("_lobe", "")
             for side in ("right", "left"):
                 for dim, v in (rec.get(side) or {}).items():

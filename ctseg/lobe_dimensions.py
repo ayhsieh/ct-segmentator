@@ -25,7 +25,9 @@ Writes <results>/<case>/lobe_dimensions.stats.json.
 """
 import argparse
 import json
+import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 import nibabel as nib
 import numpy as np
@@ -122,13 +124,12 @@ def measure(group, case):
         return {"error": why}
     c, n, rms = got
     fwd, up = frame(d, c, n)
-    out = {"midline": {"from": "septum pellucidum + brainstem centre line",
+    out = {"midline": {"from": "septum pellucidum, brainstem centre line, sagittal sinus",
                        "fit_rms_mm": round(rms, 2)},
            "lobes": {}}
-    for lobe in LOBES:
-        m, aff = load(d / f"{lobe}.nii.gz")
-        if not m.any():
-            continue
+
+    def dims(m, aff):
+        """partial flag and per-side width / length / height of one mask."""
         W = world(m, aff)
         side_of = (W - c) @ n
         rec = {"partial": bool(m[:, :, 0].any() or m[:, :, -1].any())}
@@ -140,8 +141,37 @@ def measure(group, case):
             rec[side] = {"width_mm": round(span(np.abs(V @ n)), 1),
                          "length_mm": round(span(V @ fwd), 1),
                          "height_mm": round(span(V @ up), 1)}
-        out["lobes"][lobe] = rec
+        return rec
+
+    cerebrum = None
+    for lobe in LOBES:
+        m, aff = load(d / f"{lobe}.nii.gz")
+        if not m.any():
+            continue
+        out["lobes"][lobe] = dims(m, aff)
+        cerebrum = m if cerebrum is None else cerebrum | m
+    # The four lobes together, measured the same way: what a lobe's dimension is divided
+    # by to take the size of the head out and leave its share of the hemisphere.
+    if cerebrum is not None:
+        out["cerebrum"] = dims(cerebrum, aff)
     return out
+
+
+def run_one(group, case):
+    """Measure one case and write its stats; returns (case, error or None)."""
+    res = measure(group, case)
+    (seg_dir_for(group) / case / "lobe_dimensions.stats.json").write_text(
+        json.dumps(res, indent=2))
+    return case, res.get("error")
+
+
+def done(f):
+    """A case already measured by this version (it carries the whole-cerebrum record)."""
+    try:
+        d = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return False
+    return "cerebrum" in d or "error" in d
 
 
 def main():
@@ -149,16 +179,20 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--group", required=True)
     ap.add_argument("--case", nargs="+", default=None)
+    ap.add_argument("--workers", type=int, default=min(12, os.cpu_count() or 1),
+                    help="cases measured at once; reading the masks is most of the time")
+    ap.add_argument("--force", action="store_true", help="measure cases already done")
     ap.add_argument("--device", default=None, help="accepted and ignored: no model runs")
     a = ap.parse_args()
     root = seg_dir_for(a.group)
     cases = a.case or sorted(p.name for p in root.iterdir() if (p / "brain_structures").is_dir())
-    for case in cases:
-        res = measure(a.group, case)
-        (root / case / "lobe_dimensions.stats.json").write_text(json.dumps(res, indent=2))
-        print(case, res.get("error") or " ".join(
-            f"{k[:-5]} R{v.get('right', {}).get('width_mm')}/L{v.get('left', {}).get('width_mm')}"
-            for k, v in res["lobes"].items()), flush=True)
+    if not a.force:
+        cases = [c for c in cases if not done(root / c / "lobe_dimensions.stats.json")]
+    print(f"{len(cases)} case(s) to measure, {a.workers} at a time", flush=True)
+    # Only whether each case worked is printed - the measurements are in its stats file.
+    with ProcessPoolExecutor(max_workers=a.workers) as pool:
+        for case, err in pool.map(run_one, [a.group] * len(cases), cases):
+            print(case, err or "ok", flush=True)
 
 
 if __name__ == "__main__":
